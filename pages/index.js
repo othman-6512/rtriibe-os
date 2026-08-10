@@ -124,6 +124,15 @@ export default function Page() {
 
   const openLeaf = (id) => { setSelT(null); setSelL(null); setView(id); };
 
+  const quickAdd = () => {
+    if (!supabase) { alert("Connect the database first (add the Supabase keys in Vercel)."); return; }
+    if (view === "t-vacancies") insertRow("vacancies", { role: "New role", school: "", contact: "", shortlist: 0, days_open: 0, kind: "teacher", status: "Open" });
+    else if (view === "lsa-directory") insertRow("lsas", { name: "New LSA", status: "Available", placement_fee: 1000, calc: DEFAULT_CALC, notes: [], payments: [] });
+    else if (view === "tasks-todo") insertRow("tasks", { text: "New task", done: false, due: "Today", tag: "General" });
+    else if (view === "schools-list") insertRow("schools", { name: "New school", grp: "", curriculum: "", flags: [] });
+    else alert("Open Vacancies, LSAs, Tasks or Schools, then press Add.");
+  };
+
   if (!ready) return null;
   if (!authed) return <Gate onOk={() => setAuthed(true)} />;
 
@@ -158,7 +167,7 @@ export default function Page() {
       <div className="x-main">
         <header className="x-top">
           <div className="x-searchwrap"><Search size={16} color={C.muted} /><input className="x-search" placeholder="Search everything…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-          <div className="x-topr"><button className="x-primary"><Plus size={16} /> Add</button><button className="x-bell"><Bell size={17} /><span className="x-bdot" /></button></div>
+          <div className="x-topr"><button className="x-primary" onClick={quickAdd}><Plus size={16} /> Add</button><button className="x-bell"><Bell size={17} /><span className="x-bdot" /></button></div>
         </header>
 
         <main className="x-canvas">
@@ -170,7 +179,7 @@ export default function Page() {
 
           {view === "t-database" && !selT && <TeacherDB teachers={teachers} q={q} onSelect={setSelT} />}
           {view === "t-database" && selT && <TeacherProfile t={teachers.find((x) => x.id === selT)} onBack={() => setSelT(null)} onSave={(p) => updateRow("candidates", selT, p)} />}
-          {view === "t-vacancies" && <Vacancies rows={vacancies} onAdd={(r) => insertRow("vacancies", r)} onDel={(id) => deleteRow("vacancies", id)} />}
+          {view === "t-vacancies" && <Vacancies rows={vacancies} onAdd={(r) => insertRow("vacancies", r)} onUpdate={(id, p) => updateRow("vacancies", id, p)} onDel={(id) => deleteRow("vacancies", id)} />}
           {view === "t-pipeline" && <PipelineBoard rows={pipeline} />}
 
           {view === "lsa-dashboard" && <LsaDashboard lsas={lsas} go={openLeaf} />}
@@ -541,27 +550,43 @@ function Attendance({ lsas, rows }) {
   );
 }
 
-function Vacancies({ rows, onAdd, onDel }) {
-  const [f, setF] = useState({ role: "", school: "", contact: "", kind: "teacher" });
-  const tone = (d) => (d > 7 ? C.red : d > 4 ? C.amber : C.blue);
+const VAC_STATUSES = ["Open", "Filled", "On Hold", "Closed"];
+const VAC_STATUS_COLOR = { Open: C.green, Filled: C.blue, "On Hold": C.amber, Closed: C.muted };
+function Vacancies({ rows, onAdd, onUpdate, onDel }) {
+  const [filter, setFilter] = useState("All");
+  const daysOpen = (r) => (r.created_at ? Math.max(0, Math.floor((Date.now() - new Date(r.created_at)) / 86400000)) : (r.days_open || 0));
+  const tone = (d) => (d > 7 ? C.red : d > 4 ? C.amber : C.muted);
+  const cycle = (r) => { const i = VAC_STATUSES.indexOf(r.status || "Open"); onUpdate(r.id, { status: VAC_STATUSES[(i + 1) % VAC_STATUSES.length] }); };
+  const shown = rows.filter((r) => filter === "All" || (r.status || "Open") === filter);
+  const addBlank = () => onAdd({ role: "New role", school: "", contact: "", shortlist: 0, days_open: 0, kind: "teacher", status: "Open" });
+  const exportCsv = () => {
+    const head = ["Role", "School", "Contact", "Status", "Days open", "Shortlist"];
+    const lines = rows.map((r) => [r.role, r.school, r.contact, r.status, daysOpen(r), r.shortlist].map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(","));
+    const csv = [head.join(","), ...lines].join("\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "vacancies.csv"; a.click();
+  };
   return (
-    <div className="x-page"><div className="x-headrow"><div><h1 className="x-h1">Vacancies</h1><p className="x-sub">Live briefs. Aging roles flag automatically.</p></div></div>
-      <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Add a vacancy</h2></div>
-        <div className="x-payadd" style={{ flexWrap: "wrap" }}>
-          <input className="x-input" placeholder="Role" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })} />
-          <input className="x-input" placeholder="School" value={f.school} onChange={(e) => setF({ ...f, school: e.target.value })} />
-          <input className="x-input" placeholder="Contact" value={f.contact} onChange={(e) => setF({ ...f, contact: e.target.value })} />
-          <button className="x-primary sm" onClick={() => { if (f.role) { onAdd({ ...f, shortlist: 0, days_open: 0, status: "Open" }); setF({ role: "", school: "", contact: "", kind: "teacher" }); } }}><Plus size={14} /></button>
-        </div>
+    <div className="x-page">
+      <div className="x-headrow">
+        <div><h1 className="x-h1">Vacancies</h1><p className="x-sub">Every role. Change status right in the row. Aging shows days open.</p></div>
+        <div style={{ display: "flex", gap: 8 }}><button className="x-ghost" onClick={exportCsv}><Download size={14} /> Export CSV</button><button className="x-primary" onClick={addBlank}><Plus size={15} /> New vacancy</button></div>
       </div>
-      {rows.length === 0 ? <div className="x-panel"><div className="x-empty">No vacancies yet. Add one above, or import your CSV in Supabase.</div></div> : (
-        <div className="x-cards">{rows.map((v) => (
-          <div key={v.id} className="x-vcard"><span className="x-vbar" style={{ background: tone(v.days_open || 0) }} />
-            <div className="x-vtop"><span className="x-vrole">{v.role}</span><span className="x-vdays nums" style={{ color: tone(v.days_open || 0) }}>{v.days_open || 0}d</span></div>
-            <div className="x-lrow"><Building2 size={13} color={C.muted} /> {v.school || "—"}</div>
-            <div className="x-vfoot" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><span className="x-lrow" style={{ margin: 0 }}><Users size={13} /> {v.shortlist || 0} shortlisted</span><button className="x-ic" onClick={() => onDel(v.id)}><Trash2 size={13} /></button></div>
-          </div>
-        ))}</div>
+      <div className="x-filters" style={{ marginBottom: 16 }}>{["All", ...VAC_STATUSES].map((s) => <button key={s} className={"x-chip" + (filter === s ? " on" : "")} onClick={() => setFilter(s)}>{s}</button>)}</div>
+      {shown.length === 0 ? <div className="x-panel"><div className="x-empty">No vacancies here. Press New vacancy, or import your CSV in Supabase.</div></div> : (
+        <div className="x-tablewrap"><table className="x-table">
+          <thead><tr><th>Role</th><th>School</th><th>Contact</th><th>Status</th><th className="r">Days</th><th className="r">Shortlist</th><th></th></tr></thead>
+          <tbody>{shown.map((v) => { const d = daysOpen(v); const sc = VAC_STATUS_COLOR[v.status || "Open"]; return (
+            <tr key={v.id}>
+              <td><input className="x-cellinput b" defaultValue={v.role || ""} onBlur={(e) => onUpdate(v.id, { role: e.target.value })} /></td>
+              <td><input className="x-cellinput" defaultValue={v.school || ""} onBlur={(e) => onUpdate(v.id, { school: e.target.value })} /></td>
+              <td><input className="x-cellinput" defaultValue={v.contact || ""} onBlur={(e) => onUpdate(v.id, { contact: e.target.value })} /></td>
+              <td><button className="x-pill" style={{ color: sc, background: sc + "16", borderColor: sc + "30", cursor: "pointer" }} onClick={() => cycle(v)}>{v.status || "Open"}</button></td>
+              <td className="r nums" style={{ color: tone(d), fontWeight: 600 }}>{d}d</td>
+              <td className="r"><input className="x-cellinput nums" style={{ textAlign: "right", width: 46 }} defaultValue={v.shortlist || 0} onBlur={(e) => onUpdate(v.id, { shortlist: Number(e.target.value) || 0 })} /></td>
+              <td className="rowact"><button className="x-ic" onClick={() => onDel(v.id)}><Trash2 size={13} /></button></td>
+            </tr>
+          ); })}</tbody>
+        </table></div>
       )}
     </div>
   );

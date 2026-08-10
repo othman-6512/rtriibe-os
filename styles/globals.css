@@ -239,3 +239,25 @@ textarea.x-input { resize: vertical; }
 .x-cellinput:hover { border-color: #E8EAEF; }
 .x-cellinput:focus { border-color: #DA2A34; background: #fff; }
 .x-cellinput.b { font-weight: 600; color: #1C2230; }
+
+/* modal form + bell + inline select */
+.x-modal.lg { width: min(640px, 94vw); max-height: 88vh; overflow-y: auto; }
+.x-formgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; margin-bottom: 16px; }
+.x-formfield { display: flex; flex-direction: column; gap: 5px; }
+.x-formfield.full { grid-column: 1 / -1; }
+.x-formlabel { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #7A8494; font-weight: 600; }
+.x-modalactions { display: flex; justify-content: flex-end; gap: 8px; }
+.x-cbrow { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #2C3446; font-weight: 500; cursor: pointer; }
+.x-cbrow input { width: 16px; height: 16px; accent-color: #DA2A34; }
+.x-cellsel { border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 5px 6px; font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; outline: none; }
+.x-cellsel:hover { border-color: #E8EAEF; }
+.x-cellsel:focus { border-color: #DA2A34; }
+.x-belldot { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 9px; background: #DA2A34; color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
+.x-belldrop { position: absolute; top: 48px; right: 0; width: 320px; max-height: 420px; overflow-y: auto; background: #fff; border: 1px solid #E8EAEF; border-radius: 12px; box-shadow: 0 12px 40px rgba(28,34,48,.16); z-index: 60; padding: 8px; }
+.x-belltitle { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: #7A8494; font-weight: 700; padding: 10px 8px 4px; }
+.x-bellitem { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; background: none; border: none; padding: 9px 8px; border-radius: 8px; cursor: pointer; font-family: inherit; }
+.x-bellitem:hover { background: #F6F7F9; }
+.x-bellt { font-size: 13px; color: #2C3446; font-weight: 500; }
+.x-bellm { font-size: 11px; color: #7A8494; }
+.x-bellempty { font-size: 13px; color: #7A8494; padding: 18px; text-align: center; }
+@media (max-width: 680px){ .x-formgrid { grid-template-columns: 1fr; } .x-belldrop { width: 280px; } }

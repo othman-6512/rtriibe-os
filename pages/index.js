@@ -118,9 +118,9 @@ export default function Page() {
                    schools: () => supabase && supabase.from("schools").select("*").order("created_at", { ascending: false }).then(({ data }) => setSchools(data || [])),
                    tasks: () => supabase && supabase.from("tasks").select("*").order("created_at", { ascending: false }).then(({ data }) => setTasks(data || [])) };
 
-  const updateRow = async (table, id, patch) => { if (supabase) { await supabase.from(table).update(patch).eq("id", id); reload[table] && reload[table](); } };
-  const insertRow = async (table, row) => { if (supabase) { await supabase.from(table).insert(row); reload[table] && reload[table](); } };
-  const deleteRow = async (table, id) => { if (supabase) { await supabase.from(table).delete().eq("id", id); reload[table] && reload[table](); } };
+  const updateRow = async (table, id, patch) => { if (supabase) { const { error } = await supabase.from(table).update(patch).eq("id", id); if (error) alert("Save failed: " + error.message); reload[table] && reload[table](); } };
+  const insertRow = async (table, row) => { if (supabase) { const { error } = await supabase.from(table).insert(row); if (error) alert("Add failed: " + error.message); reload[table] && reload[table](); } };
+  const deleteRow = async (table, id) => { if (supabase) { const { error } = await supabase.from(table).delete().eq("id", id); if (error) alert("Delete failed: " + error.message); reload[table] && reload[table](); } };
 
   const openLeaf = (id) => { setSelT(null); setSelL(null); setView(id); };
 
@@ -130,8 +130,9 @@ export default function Page() {
     else if (view === "lsa-directory") insertRow("lsas", { name: "New LSA", status: "Available", placement_fee: 1000, calc: DEFAULT_CALC, notes: [], payments: [] });
     else if (view === "tasks-todo") insertRow("tasks", { text: "New task", done: false, due: "Today", tag: "General" });
     else if (view === "schools-list") insertRow("schools", { name: "New school", grp: "", curriculum: "", flags: [] });
-    else alert("Open Vacancies, LSAs, Tasks or Schools, then press Add.");
   };
+
+  const canAdd = ["t-vacancies", "lsa-directory", "tasks-todo", "schools-list"].includes(view);
 
   if (!ready) return null;
   if (!authed) return <Gate onOk={() => setAuthed(true)} />;
@@ -167,7 +168,7 @@ export default function Page() {
       <div className="x-main">
         <header className="x-top">
           <div className="x-searchwrap"><Search size={16} color={C.muted} /><input className="x-search" placeholder="Search everything…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-          <div className="x-topr"><button className="x-primary" onClick={quickAdd}><Plus size={16} /> Add</button><button className="x-bell"><Bell size={17} /><span className="x-bdot" /></button></div>
+          <div className="x-topr">{canAdd && <button className="x-primary" onClick={quickAdd}><Plus size={16} /> Add</button>}</div>
         </header>
 
         <main className="x-canvas">
@@ -242,13 +243,24 @@ function Extract({ lsaMode, onSaved }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-  const [res, setRes] = useState({ teacher: 0, lsa: 0, failed: 0, done: 0, total: 0 });
+  const [res, setRes] = useState({ teacher: 0, lsa: 0, dupe: 0, failed: 0, done: 0, total: 0 });
 
   const toB64 = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result).split(",")[1]); r.onerror = reject; r.readAsDataURL(file); });
+
+  const isDupe = async (table, name, email) => {
+    const nm = (name || "").trim();
+    if (!nm || !supabase) return false;
+    const { data } = await supabase.from(table).select("email").ilike("name", nm);
+    if (!data || !data.length) return false;
+    if (email) return data.some((r) => (r.email || "").toLowerCase() === email.toLowerCase());
+    return true;
+  };
 
   const saveResult = async (parsed) => {
     if (!supabase) return "failed";
     const type = route === "auto" ? (parsed.type === "lsa" ? "lsa" : "teacher") : route;
+    const table = type === "lsa" ? "lsas" : "candidates";
+    if (await isDupe(table, parsed.name, parsed.email)) return "dupe";
     if (type === "lsa") {
       await supabase.from("lsas").insert({
         name: parsed.name || "Unnamed", cert: parsed.cert || "", exp: "", langs: parsed.langs || "",
@@ -276,7 +288,7 @@ function Extract({ lsaMode, onSaved }) {
 
   const extractText = async () => {
     if (!text.trim()) return;
-    setBusy(true); setMsg("Reading CV…"); setRes({ teacher: 0, lsa: 0, failed: 0, done: 0, total: 1 });
+    setBusy(true); setMsg("Reading CV…"); setRes({ teacher: 0, lsa: 0, dupe: 0, failed: 0, done: 0, total: 1 });
     try { const parsed = await runOne({ text }); const kind = await saveResult(parsed);
       setRes((x) => ({ ...x, [kind]: 1, done: 1 })); setMsg("Saved."); setText(""); onSaved && onSaved();
     } catch (e) { setRes((x) => ({ ...x, failed: 1, done: 1 })); setMsg("Could not read that one."); }
@@ -285,7 +297,7 @@ function Extract({ lsaMode, onSaved }) {
 
   const extractFiles = async (files) => {
     const arr = Array.from(files).slice(0, 2000);
-    setBusy(true); setRes({ teacher: 0, lsa: 0, failed: 0, done: 0, total: arr.length });
+    setBusy(true); setRes({ teacher: 0, lsa: 0, dupe: 0, failed: 0, done: 0, total: arr.length });
     for (let i = 0; i < arr.length; i++) {
       setMsg(`Processing ${i + 1} of ${arr.length}…`);
       try { const b64 = await toB64(arr[i]); const parsed = await runOne({ pdfBase64: b64 }); const kind = await saveResult(parsed);
@@ -300,7 +312,7 @@ function Extract({ lsaMode, onSaved }) {
   return (
     <div className="x-page">
       <h1 className="x-h1">{lsaMode ? "Add LSAs" : "Bulk Extract"}</h1>
-      <p className="x-sub">Paste one CV, or drop up to 2,000 PDFs. Each is read and {lsaMode ? "added to the LSA directory" : "filed as a teacher or LSA"} automatically.</p>
+      <p className="x-sub">Paste one CV, or drop up to 2,000 PDFs. Each is read and {lsaMode ? "added to the LSA directory" : "filed as a teacher or LSA"} automatically. Duplicates are skipped.</p>
 
       {!lsaMode && (
         <div className="x-routewrap"><span className="x-routelabel">Route each CV to</span>
@@ -326,10 +338,10 @@ function Extract({ lsaMode, onSaved }) {
           <div className="x-resgrid">
             <div className="x-res"><div className="x-resn" style={{ color: C.blue }}>{res.teacher}</div><div className="x-resl">Teachers</div></div>
             <div className="x-res"><div className="x-resn" style={{ color: C.green }}>{res.lsa}</div><div className="x-resl">LSAs</div></div>
-            <div className="x-res"><div className="x-resn" style={{ color: C.red }}>{res.failed}</div><div className="x-resl">Need review</div></div>
+            <div className="x-res"><div className="x-resn" style={{ color: C.amber }}>{res.dupe}</div><div className="x-resl">Duplicates skipped</div></div>
             <div className="x-res"><div className="x-resn" style={{ color: C.ink }}>{res.done}</div><div className="x-resl">Processed</div></div>
           </div>
-          {!busy && res.done > 0 && <div className="x-doneline"><CheckCircle2 size={15} color={C.green} /> Saved to the database. Open Teachers → Database or LSAs → Directory.</div>}
+          {!busy && res.done > 0 && <div className="x-doneline"><CheckCircle2 size={15} color={C.green} /> Saved. {res.failed > 0 ? res.failed + " need review. " : ""}Open Teachers → Database or LSAs → Directory.</div>}
         </div>
       )}
     </div>

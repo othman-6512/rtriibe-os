@@ -233,3 +233,9 @@ textarea.x-input { resize: vertical; }
   .x-leaf, .x-grouphead { justify-content: center; }
   .x-subwrap { margin-left: 6px; }
 }
+
+/* inline editable table cells */
+.x-cellinput { width: 100%; border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 5px 7px; font-family: inherit; font-size: 13.5px; color: #2C3446; outline: none; }
+.x-cellinput:hover { border-color: #E8EAEF; }
+.x-cellinput:focus { border-color: #DA2A34; background: #fff; }
+.x-cellinput.b { font-weight: 600; color: #1C2230; }

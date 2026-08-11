@@ -28,13 +28,49 @@ function calcRate(c = {}) {
 const DEFAULT_CALC = { hours: 20, level: "Mid", qual: "Level 3", langs: 1, tier: "Standard", loc: "Dubai", needs: "Mild", contract: "3 months", urgency: "Standard" };
 
 function downloadCsv(filename, columns, rows) {
-  const esc = (x) => `"${String(x ?? "").replace(/"/g, '""')}"`;
+  const esc = (x) => `"${String(x ?? "").replace(/\r?\n/g, " / ").replace(/"/g, '""')}"`;
   const head = columns.map((c) => esc(c.label)).join(",");
   const body = rows.map((r) => columns.map((c) => esc(typeof c.get === "function" ? c.get(r) : r[c.key])).join(",")).join("\n");
   const csv = "\uFEFF" + head + "\n" + body;
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   a.download = filename; a.click();
+}
+
+function parseCsv(text) {
+  const rows = []; let row = [], field = "", inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) { if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; } else field += c; }
+    else if (c === '"') inQ = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else if (c !== "\r") field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+const VAC_MAP = { school: "school", contact: "contact", level: "level", role: "role", qualification: "qualification", budget: "budget", status: "status", dateadded: "date_added", notes: "notes" };
+const PIPE_MAP = { school: "school", group: "grp", role: "role", candidate: "candidate_name", type: "type", stage: "stage", interviewdate: "interview_date", startdate: "start_date", interviewrating: "interview_rating", outcome: "outcome", nextaction: "next_action", nextactiondate: "next_action_date", followups: "follow_ups", priority: "priority", notes: "notes" };
+function importCsv(file, map, cb) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const rows = parseCsv(String(reader.result || ""));
+    if (rows.length < 2) return cb([]);
+    const headers = rows[0].map((h) => (h || "").trim().toLowerCase());
+    const out = [];
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i]; if (!r || r.every((x) => (x || "").trim() === "")) continue;
+      const obj = {};
+      headers.forEach((h, j) => { const key = map[h]; if (key) obj[key] = r[j]; });
+      if (obj.follow_ups !== undefined) obj.follow_ups = Number(obj.follow_ups) || 0;
+      if (obj.shortlist !== undefined) obj.shortlist = Number(obj.shortlist) || 0;
+      if (obj.priority !== undefined) obj.priority = String(obj.priority).toLowerCase() === "true";
+      out.push(obj);
+    }
+    cb(out);
+  };
+  reader.readAsText(file);
 }
 
 const NAV = [
@@ -122,6 +158,7 @@ export default function Page() {
   const updateRow = async (table, id, patch) => { if (!supabase) return; const { error } = await supabase.from(table).update(patch).eq("id", id); if (error) alert("Save failed: " + error.message); reloadTable(table); };
   const insertRow = async (table, row) => { if (!supabase) return; const { error } = await supabase.from(table).insert(row); if (error) alert("Add failed: " + error.message); reloadTable(table); };
   const deleteRow = async (table, id) => { if (!supabase) return; const { error } = await supabase.from(table).delete().eq("id", id); if (error) alert("Delete failed: " + error.message); reloadTable(table); };
+  const importRows = async (table, rows) => { if (!supabase) return; if (!rows.length) { alert("No rows found in that file."); return; } const { error } = await supabase.from(table).insert(rows); if (error) { alert("Import failed: " + error.message); return; } reloadTable(table); alert("Imported " + rows.length + " rows."); };
 
   const openLeaf = (id) => { setSelT(null); setSelL(null); setBellOpen(false); setView(id); };
 
@@ -181,21 +218,21 @@ export default function Page() {
           {!hasSupabase && <div className="x-page"><div className="x-notice">Database not connected. Add <b>NEXT_PUBLIC_SUPABASE_URL</b> and <b>NEXT_PUBLIC_SUPABASE_ANON_KEY</b> in Vercel, then redeploy.</div></div>}
 
           {view === "dashboard" && <Dashboard go={openLeaf} teachers={teachers} lsas={lsas} vacancies={vacancies} tasks={tasks} pipeline={pipeline} />}
-          {view === "extract" && <Extract teachersCount={teachers.length} onSaved={loadAll} />}
-          {view === "lsa-add" && <Extract lsaMode teachersCount={teachers.length} onSaved={loadAll} />}
+          {view === "extract" && <Extract teachersCount={teachers.length} existing={[...teachers.map((t) => t.name), ...lsas.map((l) => l.name)]} onSaved={loadAll} />}
+          {view === "lsa-add" && <Extract lsaMode teachersCount={teachers.length} existing={[...teachers.map((t) => t.name), ...lsas.map((l) => l.name)]} onSaved={loadAll} />}
 
           {view === "t-database" && !selT && <TeacherDB teachers={teachers} q={q} onSelect={setSelT} onAdd={(r) => insertRow("candidates", r)} />}
           {view === "t-database" && selT && <TeacherProfile t={teachers.find((x) => x.id === selT)} onBack={() => setSelT(null)} onSave={(p) => updateRow("candidates", selT, p)} />}
-          {view === "t-vacancies" && <Vacancies rows={vacancies} onAdd={(r) => insertRow("vacancies", r)} onUpdate={(id, p) => updateRow("vacancies", id, p)} onDel={(id) => deleteRow("vacancies", id)} />}
-          {view === "t-pipeline" && <PipelineView rows={pipeline} onAdd={(r) => insertRow("pipeline", r)} onUpdate={(id, p) => updateRow("pipeline", id, p)} onDel={(id) => deleteRow("pipeline", id)} />}
+          {view === "t-vacancies" && <Vacancies rows={vacancies} onAdd={(r) => insertRow("vacancies", r)} onUpdate={(id, p) => updateRow("vacancies", id, p)} onDel={(id) => deleteRow("vacancies", id)} onImport={(rows) => importRows("vacancies", rows)} />}
+          {view === "t-pipeline" && <PipelineView rows={pipeline} onAdd={(r) => insertRow("pipeline", r)} onUpdate={(id, p) => updateRow("pipeline", id, p)} onDel={(id) => deleteRow("pipeline", id)} onImport={(rows) => importRows("pipeline", rows)} />}
 
           {view === "lsa-dashboard" && <LsaDashboard lsas={lsas} go={openLeaf} />}
           {view === "lsa-directory" && !selL && <LsaDirectory lsas={lsas} q={q} onSelect={setSelL} onAdd={(r) => insertRow("lsas", r)} />}
           {view === "lsa-directory" && selL && <LsaProfile lsa={lsas.find((x) => x.id === selL)} onBack={() => setSelL(null)} onSave={(p) => updateRow("lsas", selL, p)} />}
-          {view === "lsa-bookings" && <Bookings rows={bookings} onAdd={(r) => insertRow("bookings", r)} onDel={(id) => deleteRow("bookings", id)} />}
-          {view === "lsa-attendance" && <Attendance rows={attendance} onAdd={(r) => insertRow("attendance", r)} onDel={(id) => deleteRow("attendance", id)} />}
+          {view === "lsa-bookings" && <Bookings rows={bookings} lsas={lsas} onAdd={(r) => insertRow("bookings", r)} onDel={(id) => deleteRow("bookings", id)} />}
+          {view === "lsa-attendance" && <Attendance rows={attendance} lsas={lsas} onAdd={(r) => insertRow("attendance", r)} onDel={(id) => deleteRow("attendance", id)} />}
 
-          {view === "tasks-todo" && <Tasks rows={tasks} onAdd={(r) => insertRow("tasks", r)} onToggle={(t) => updateRow("tasks", t.id, { done: !t.done })} onDel={(id) => deleteRow("tasks", id)} />}
+          {view === "tasks-todo" && <Tasks rows={tasks} onAdd={(r) => insertRow("tasks", r)} onToggle={(t) => updateRow("tasks", t.id, { done: !t.done })} onUpdate={(id, p) => updateRow("tasks", id, p)} onDel={(id) => deleteRow("tasks", id)} />}
           {view === "tasks-log" && <DailyLog teachers={teachers} lsas={lsas} />}
           {view === "schools-list" && <Schools rows={schools} onAdd={(r) => insertRow("schools", r)} onDel={(id) => deleteRow("schools", id)} />}
           {view === "supply-timesheets" && <Simple title="Timesheets" sub="rTriibe FZCO format · TRN 100452871500003." />}
@@ -234,12 +271,22 @@ function Dashboard({ go, teachers, lsas, vacancies, tasks, pipeline }) {
 }
 
 /* ============================ EXTRACT ============================ */
-function Extract({ lsaMode, teachersCount, onSaved }) {
+function Extract({ lsaMode, teachersCount, existing, onSaved }) {
   const [route, setRoute] = useState(lsaMode ? "lsa" : "auto");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [res, setRes] = useState({ teacher: 0, lsa: 0, dupe: 0, failed: 0, done: 0, total: 0 });
+  const [checkRes, setCheckRes] = useState(null);
+  const checkFiles = (files) => {
+    const names = (existing || []).map((n) => (n || "").toLowerCase()).filter(Boolean);
+    const out = Array.from(files).map((f) => {
+      const clean = f.name.replace(/\.pdf$/i, "").replace(/[_\-]+/g, " ").toLowerCase();
+      const hit = names.find((nm) => clean.includes(nm) || nm.split(" ").filter((w) => w.length > 2).every((w) => clean.includes(w)));
+      return { file: f.name, matched: !!hit };
+    });
+    setCheckRes(out);
+  };
   const toB64 = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result).split(",")[1]); r.onerror = reject; r.readAsDataURL(file); });
 
   const isDupe = async (table, name, email) => {
@@ -302,6 +349,16 @@ function Extract({ lsaMode, teachersCount, onSaved }) {
         </div>
         {!busy && res.done > 0 && <div className="x-doneline"><CheckCircle2 size={15} color={C.green} /> Saved. {res.failed > 0 ? res.failed + " need review. " : ""}Open Teachers → Database or LSAs → Directory.</div>}
       </div>}
+      <div className="x-panel" style={{ marginTop: 18 }}>
+        <div className="x-panelhead"><h2 className="x-h2">Check which CVs are already in the system</h2><span className="x-pmeta">Free · no API used</span></div>
+        <p className="x-sub" style={{ marginTop: 0, marginBottom: 12 }}>Select CV files and it matches their filenames against everyone already saved, so you can see what's new before extracting.</p>
+        <input id="checkfiles" type="file" accept="application/pdf" multiple style={{ display: "none" }} onChange={(e) => checkFiles(e.target.files)} />
+        <button className="x-ghost" onClick={() => document.getElementById("checkfiles").click()}><UploadCloud size={14} /> Choose CVs to check</button>
+        {checkRes && <div style={{ marginTop: 14 }}>
+          <div className="x-doneline" style={{ marginBottom: 10 }}>{checkRes.filter((r) => r.matched).length} already in system · {checkRes.filter((r) => !r.matched).length} new</div>
+          {checkRes.map((r, i) => <div key={i} className="x-noterow"><div className="x-notet">{r.file}</div>{r.matched ? <span className="x-pill" style={{ color: C.green, background: C.green + "16", borderColor: C.green + "30" }}>In system</span> : <span className="x-pill" style={{ color: C.blue, background: C.blue + "16", borderColor: C.blue + "30" }}>New</span>}</div>)}
+        </div>}
+      </div>
     </div>
   );
 }
@@ -472,15 +529,17 @@ const BOOKING_FIELDS = [
   { key: "rate", label: "Rate / month", type: "number" }, { key: "fee", label: "Placement fee", type: "number" },
   { key: "status", label: "Status", type: "select", opts: ["Active", "Ended"] },
 ];
-function Bookings({ rows, onAdd, onDel }) {
+function Bookings({ rows, lsas, onAdd, onDel }) {
   const [modal, setModal] = useState(false); const [openC, setOpenC] = useState(null);
+  const lsaNames = (lsas || []).map((l) => l.name).filter(Boolean);
+  const fields = [lsaNames.length ? { key: "lsa_name", label: "LSA", type: "select", opts: lsaNames } : { key: "lsa_name", label: "LSA name" }, { key: "family", label: "Family" }, { key: "location", label: "Location" }, { key: "rate", label: "Rate / month", type: "number" }, { key: "fee", label: "Placement fee", type: "number" }, { key: "status", label: "Status", type: "select", opts: ["Active", "Ended"] }];
   return (
     <div className="x-page">
       <div className="x-headrow"><div><h1 className="x-h1">Bookings</h1><p className="x-sub">Active family placements. Click a card for details.</p></div><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New booking</button></div>
       {rows.length === 0 ? <div className="x-panel"><div className="x-empty">No bookings yet. Press New booking.</div></div> : (
         <div className="x-cards">{rows.map((b) => <button key={b.id} className="x-lcard" onClick={() => setOpenC(b)}><div className="x-lctop"><span className="x-lname">{b.lsa_name}</span><Pill s={b.status} /></div><div className="x-lrow"><Users size={13} color={C.muted} /> {b.family || "—"}</div><div className="x-lrow"><MapPin size={13} color={C.muted} /> {b.location || "—"}</div><div className="x-lcfoot"><span className="x-lfee nums">AED {fmt(Number(b.rate || 0) + Number(b.fee || 0))}<span className="x-lper">/mo</span></span><ChevronRight size={15} color={C.faint} /></div></button>)}</div>
       )}
-      {modal && <FormModal title="New booking" fields={BOOKING_FIELDS} initial={{ status: "Active" }} onClose={() => setModal(false)} onSave={(d) => { onAdd(d); setModal(false); }} />}
+      {modal && <FormModal title="New booking" fields={fields} initial={{ status: "Active", lsa_name: lsaNames[0] || "" }} onClose={() => setModal(false)} onSave={(d) => { onAdd(d); setModal(false); }} />}
       {openC && <><div className="x-scrim" onClick={() => setOpenC(null)} /><div className="x-modal"><div className="x-modalhead"><h2 className="x-h2">{openC.lsa_name}</h2><button className="x-ic" onClick={() => setOpenC(null)}><X size={16} /></button></div><Row k="Family" v={openC.family || "—"} /><Row k="Location" v={openC.location || "—"} /><Row k="Rate/mo" v={"AED " + fmt(openC.rate || 0)} /><Row k="Placement fee" v={"AED " + fmt(openC.fee || 0)} /><Row k="Total" v={"AED " + fmt(Number(openC.rate || 0) + Number(openC.fee || 0))} /><div style={{ marginTop: 14, textAlign: "right" }}><button className="x-ghost" onClick={() => { onDel(openC.id); setOpenC(null); }}><Trash2 size={14} /> Delete</button></div></div></>}
     </div>
   );
@@ -491,8 +550,10 @@ const ATT_FIELDS = [
   { key: "lsa_name", label: "LSA" }, { key: "date", label: "Date", type: "date" },
   { key: "start_time", label: "Start", type: "time" }, { key: "end_time", label: "End", type: "time" }, { key: "hours", label: "Hours", type: "number" },
 ];
-function Attendance({ rows, onAdd, onDel }) {
+function Attendance({ rows, lsas, onAdd, onDel }) {
   const [modal, setModal] = useState(false);
+  const lsaNames = (lsas || []).map((l) => l.name).filter(Boolean);
+  const fields = [lsaNames.length ? { key: "lsa_name", label: "LSA", type: "select", opts: lsaNames } : { key: "lsa_name", label: "LSA" }, { key: "date", label: "Date", type: "date" }, { key: "start_time", label: "Start", type: "time" }, { key: "end_time", label: "End", type: "time" }, { key: "hours", label: "Hours", type: "number" }];
   return (
     <div className="x-page">
       <div className="x-headrow"><div><h1 className="x-h1">Attendance</h1><p className="x-sub">Log sessions per LSA.</p></div><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New session</button></div>
@@ -501,7 +562,7 @@ function Attendance({ rows, onAdd, onDel }) {
           <tbody>{rows.map((a) => <tr key={a.id}><td className="b">{a.lsa_name}</td><td className="nums">{a.date}</td><td className="nums">{a.start_time}</td><td className="nums">{a.end_time}</td><td className="r nums">{a.hours}</td><td className="rowact"><button className="x-ic" onClick={() => onDel(a.id)}><Trash2 size={13} /></button></td></tr>)}</tbody>
         </table></div>
       )}
-      {modal && <FormModal title="New session" fields={ATT_FIELDS} initial={{}} onClose={() => setModal(false)} onSave={(d) => { onAdd(d); setModal(false); }} />}
+      {modal && <FormModal title="New session" fields={fields} initial={{ lsa_name: lsaNames[0] || "" }} onClose={() => setModal(false)} onSave={(d) => { onAdd(d); setModal(false); }} />}
     </div>
   );
 }
@@ -515,7 +576,7 @@ const VAC_FIELDS = [
   { key: "notes", label: "Notes", type: "textarea", full: true },
 ];
 const VAC_CSV = [{ label: "Role", key: "role" }, { label: "School", key: "school" }, { label: "Contact", key: "contact" }, { label: "Level", key: "level" }, { label: "Qualification", key: "qualification" }, { label: "Budget", key: "budget" }, { label: "Status", key: "status" }, { label: "Days open", get: (r) => daysSince(r.created_at) }, { label: "Shortlist", key: "shortlist" }, { label: "Notes", key: "notes" }];
-function Vacancies({ rows, onAdd, onUpdate, onDel }) {
+function Vacancies({ rows, onAdd, onUpdate, onDel, onImport }) {
   const [filter, setFilter] = useState("All"); const [modal, setModal] = useState(false);
   const tone = (d) => (d > 7 ? C.red : d > 4 ? C.amber : C.muted);
   const cycle = (r) => { const i = VAC_STATUSES.indexOf(r.status || "Open"); onUpdate(r.id, { status: VAC_STATUSES[(i + 1) % VAC_STATUSES.length] }); };
@@ -523,7 +584,12 @@ function Vacancies({ rows, onAdd, onUpdate, onDel }) {
   return (
     <div className="x-page">
       <div className="x-headrow"><div><h1 className="x-h1">Vacancies</h1><p className="x-sub">Every role. Change status right in the row. Aging shows days open.</p></div>
-        <div style={{ display: "flex", gap: 8 }}><button className="x-ghost" onClick={() => downloadCsv("vacancies.csv", VAC_CSV, rows)}><Download size={14} /> Export CSV</button><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New vacancy</button></div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input id="vac-import" type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; if (f) importCsv(f, VAC_MAP, onImport); e.target.value = ""; }} />
+          <button className="x-ghost" onClick={() => document.getElementById("vac-import").click()}><UploadCloud size={14} /> Import CSV</button>
+          <button className="x-ghost" onClick={() => downloadCsv("vacancies.csv", VAC_CSV, rows)}><Download size={14} /> Export CSV</button>
+          <button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New vacancy</button>
+        </div>
       </div>
       <div className="x-filters" style={{ marginBottom: 16 }}>{["All", ...VAC_STATUSES].map((s) => <button key={s} className={"x-chip" + (filter === s ? " on" : "")} onClick={() => setFilter(s)}>{s}</button>)}</div>
       {shown.length === 0 ? <div className="x-panel"><div className="x-empty">No vacancies here. Press New vacancy, or import your CSV in Supabase.</div></div> : (
@@ -557,12 +623,18 @@ const PIPE_FIELDS = [
   { key: "follow_ups", label: "Follow-ups (count)", type: "number" }, { key: "priority", label: "Priority", type: "checkbox" },
   { key: "notes", label: "Notes", type: "textarea", full: true },
 ];
-function PipelineView({ rows, onAdd, onUpdate, onDel }) {
+function PipelineView({ rows, onAdd, onUpdate, onDel, onImport }) {
   const [modal, setModal] = useState(false); const [filter, setFilter] = useState("All");
   const shown = rows.filter((r) => filter === "All" || (r.stage || "Sourcing") === filter);
   return (
     <div className="x-page">
-      <div className="x-headrow"><div><h1 className="x-h1">Pipeline</h1><p className="x-sub">Every deal. Change stage right in the row.</p></div><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New deal</button></div>
+      <div className="x-headrow"><div><h1 className="x-h1">Pipeline</h1><p className="x-sub">Every deal. Change stage right in the row.</p></div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input id="pipe-import" type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; if (f) importCsv(f, PIPE_MAP, onImport); e.target.value = ""; }} />
+          <button className="x-ghost" onClick={() => document.getElementById("pipe-import").click()}><UploadCloud size={14} /> Import CSV</button>
+          <button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New deal</button>
+        </div>
+      </div>
       <div className="x-filters" style={{ marginBottom: 16 }}>{["All", ...PIPE_STAGES].map((s) => <button key={s} className={"x-chip" + (filter === s ? " on" : "")} onClick={() => setFilter(s)}>{s}</button>)}</div>
       {shown.length === 0 ? <div className="x-panel"><div className="x-empty">Pipeline is empty. Press New deal, or import your CSV in Supabase.</div></div> : (
         <div className="x-tablewrap"><table className="x-table"><thead><tr><th>School</th><th>Candidate</th><th>Role</th><th>Stage</th><th>Next action</th><th className="r">Follow-ups</th><th></th></tr></thead>
@@ -593,13 +665,33 @@ function Schools({ rows, onAdd, onDel }) {
     </div>
   );
 }
-function Tasks({ rows, onAdd, onToggle, onDel }) {
+function Tasks({ rows, onAdd, onToggle, onUpdate, onDel }) {
   const [text, setText] = useState("");
-  const add = () => { if (text.trim()) { onAdd({ text: text.trim(), done: false, due: "Today", tag: "General" }); setText(""); } };
+  const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const CATS = ["General", "Teachers", "LSAs", "Schools", "Follow-up", "Admin"];
+  const fields = [{ key: "text", label: "Task", full: true }, { key: "due", label: "Due date", type: "date" }, { key: "tag", label: "Category", type: "select", opts: CATS }];
+  const quickAdd = () => { if (text.trim()) { onAdd({ text: text.trim(), done: false, due: "", tag: "General" }); setText(""); } };
+  const sorted = [...rows].sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0));
+  const overdue = (t) => t.due && !t.done && t.due < new Date().toISOString().slice(0, 10);
   return (
-    <div className="x-page"><h1 className="x-h1">To-do</h1><p className="x-sub">Your task list. Add, tick off, or remove anything.</p>
-      <div className="x-noteadd" style={{ maxWidth: 560 }}><input className="x-input" placeholder="Add a task…" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} /><button className="x-primary sm" onClick={add}><Plus size={14} /></button></div>
-      <div className="x-panel" style={{ marginTop: 16 }}>{rows.length === 0 && <div className="x-empty">No tasks yet.</div>}{rows.map((t) => <div key={t.id} className={"x-task" + (t.done ? " done" : "")}><button className={"x-check" + (t.done ? " on" : "")} onClick={() => onToggle(t)}>{t.done && <Check size={12} />}</button><span className="x-taskt">{t.text}</span><span className="x-tasktag">{t.tag}</span><span className="x-taskdue">{t.due}</span><button className="x-ic" onClick={() => onDel(t.id)}><Trash2 size={13} /></button></div>)}</div>
+    <div className="x-page">
+      <div className="x-headrow"><div><h1 className="x-h1">To-do</h1><p className="x-sub">Quick-add below, or a detailed task with a due date and category.</p></div><button className="x-primary" onClick={() => { setEditing(null); setModal(true); }}><Plus size={15} /> New task</button></div>
+      <div className="x-noteadd" style={{ maxWidth: 560 }}><input className="x-input" placeholder="Quick add a task…" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && quickAdd()} /><button className="x-primary sm" onClick={quickAdd}><Plus size={14} /></button></div>
+      <div className="x-panel" style={{ marginTop: 16 }}>
+        {sorted.length === 0 && <div className="x-empty">No tasks yet.</div>}
+        {sorted.map((t) => (
+          <div key={t.id} className={"x-task" + (t.done ? " done" : "")}>
+            <button className={"x-check" + (t.done ? " on" : "")} onClick={() => onToggle(t)}>{t.done && <Check size={12} />}</button>
+            <span className="x-taskt">{t.text}</span>
+            {t.tag && <span className="x-tasktag">{t.tag}</span>}
+            <span className="x-taskdue" style={overdue(t) ? { color: C.red, fontWeight: 700 } : {}}>{t.due || "—"}</span>
+            <button className="x-ic" onClick={() => { setEditing(t); setModal(true); }}><Pencil size={13} /></button>
+            <button className="x-ic" onClick={() => onDel(t.id)}><Trash2 size={13} /></button>
+          </div>
+        ))}
+      </div>
+      {modal && <FormModal title={editing ? "Edit task" : "New task"} fields={fields} initial={editing || { tag: "General" }} onClose={() => setModal(false)} onSave={(d) => { if (editing) onUpdate(editing.id, { text: d.text, due: d.due, tag: d.tag }); else onAdd({ text: d.text || "Untitled", due: d.due || "", tag: d.tag || "General", done: false }); setModal(false); }} />}
     </div>
   );
 }

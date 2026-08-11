@@ -314,6 +314,14 @@ function Extract({ lsaMode, teachersCount, existing, onSaved }) {
     setCheckRes(out);
   };
   const toB64 = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result).split(",")[1]); r.onerror = reject; r.readAsDataURL(file); });
+  const fileToBody = async (file) => {
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    if (file.type === "application/pdf" || ext === "pdf") return { pdfBase64: await toB64(file) };
+    if ((file.type || "").startsWith("image/") || ["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) return { imageBase64: await toB64(file), mediaType: file.type || "image/jpeg" };
+    if (ext === "docx") { const ab = await file.arrayBuffer(); const m = await import("mammoth/mammoth.browser"); const mammoth = m.default || m; const { value } = await mammoth.extractRawText({ arrayBuffer: ab }); return { text: value }; }
+    if (ext === "doc") throw new Error("Old .doc format — save it as PDF or .docx first");
+    return { text: await file.text() };
+  };
 
   const isDupe = async (table, name, email) => {
     const nm = (name || "").trim(); if (!nm || !supabase) return false;
@@ -370,7 +378,7 @@ function Extract({ lsaMode, teachersCount, existing, onSaved }) {
     let n = teachersCount + 1;
     for (let i = 0; i < arr.length; i++) {
       setMsg(`Processing ${i + 1} of ${arr.length}…`);
-      try { const b64 = await toB64(arr[i]); const parsed = await runOne({ pdfBase64: b64 }); const kind = await saveResult(parsed, n, arr[i]); if (kind === "teacher") n++; setRes((x) => ({ ...x, [kind]: x[kind] + 1, done: x.done + 1 })); }
+      try { const body = await fileToBody(arr[i]); const parsed = await runOne(body); const kind = await saveResult(parsed, n, arr[i]); if (kind === "teacher") n++; setRes((x) => ({ ...x, [kind]: x[kind] + 1, done: x.done + 1 })); }
       catch (e) { setRes((x) => ({ ...x, failed: x.failed + 1, done: x.done + 1 })); }
       await new Promise((r) => setTimeout(r, 600));
     }
@@ -380,11 +388,11 @@ function Extract({ lsaMode, teachersCount, existing, onSaved }) {
   return (
     <div className="x-page">
       <h1 className="x-h1">{lsaMode ? "Add LSAs" : "Bulk Extract"}</h1>
-      <p className="x-sub">Paste one CV, or drop up to 2,000 PDFs. Each is read and {lsaMode ? "added to the LSA directory" : "filed as a teacher or LSA"}. Duplicates are skipped.</p>
+      <p className="x-sub">Paste one CV, or drop up to 2,000 files (PDF, Word or image). Each is read and {lsaMode ? "added to the LSA directory" : "filed as a teacher or LSA"}. Duplicates are skipped.</p>
       {!lsaMode && <div className="x-routewrap"><span className="x-routelabel">Route each CV to</span>{[["auto", "Auto-detect"], ["teacher", "All teachers"], ["lsa", "All LSAs"]].map(([id, l]) => <button key={id} className={"x-route" + (route === id ? " on" : "")} onClick={() => setRoute(id)}>{l}</button>)}</div>}
-      <div className="x-drop"><UploadCloud size={30} color={C.muted} /><div className="x-dropt">Drop CVs or choose files</div><div className="x-dropsub">PDF · up to 2,000 files</div>
-        <input id="cvfiles" type="file" accept="application/pdf" multiple style={{ display: "none" }} onChange={(e) => extractFiles(e.target.files)} disabled={busy} />
-        <button className="x-primary lg" onClick={() => document.getElementById("cvfiles").click()} disabled={busy}>Choose PDFs</button></div>
+      <div className="x-drop"><UploadCloud size={30} color={C.muted} /><div className="x-dropt">Drop CVs or choose files</div><div className="x-dropsub">PDF, Word (.docx) or image · up to 2,000 files</div>
+        <input id="cvfiles" type="file" accept=".pdf,.docx,.doc,image/*" multiple style={{ display: "none" }} onChange={(e) => extractFiles(e.target.files)} disabled={busy} />
+        <button className="x-primary lg" onClick={() => document.getElementById("cvfiles").click()} disabled={busy}>Choose files</button></div>
       <textarea className="x-ta" placeholder="…or paste a single CV's text here" value={text} onChange={(e) => setText(e.target.value)} disabled={busy} />
       <button className="x-primary" style={{ marginTop: 10 }} onClick={extractText} disabled={busy || !text.trim()}>Extract & save</button>
       {(busy || res.done > 0) && <div className="x-panel" style={{ marginTop: 18 }}>

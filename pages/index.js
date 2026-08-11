@@ -8,11 +8,22 @@ import {
 import { supabase, hasSupabase } from "../lib/supabaseClient";
 
 const C = { ink: "#1C2230", text: "#2C3446", muted: "#7A8494", faint: "#AEB6C2", red: "#DA2A34", green: "#17915B", amber: "#C98A16", blue: "#2F6FED" };
-const STATUS_COLOR = { New: C.muted, Sourcing: C.muted, Sourced: C.muted, Screened: C.blue, Submitted: C.blue, Shortlist: C.amber, Interview: C.amber, Offer: C.red, Placed: C.green, Rejected: C.red, "Not Suitable": C.red, "In Review": C.amber, Approved: C.green, Matching: C.amber, Available: C.green, Active: C.green, Paid: C.green, Open: C.green, Filled: C.blue, "On Hold": C.amber, Closed: C.muted };
+const STATUS_COLOR = { New: C.muted, "Needs review": C.amber, Sourcing: C.muted, Sourced: C.muted, Screened: C.blue, Submitted: C.blue, Shortlist: C.amber, Interview: C.amber, Offer: C.red, Placed: C.green, Rejected: C.red, "Not Suitable": C.red, "In Review": C.amber, Approved: C.green, Matching: C.amber, Available: C.green, Active: C.green, Paid: C.green, Open: C.green, Filled: C.blue, "On Hold": C.amber, Closed: C.muted };
 const fmt = (n) => new Intl.NumberFormat("en-AE").format(Number(n) || 0);
 const initialsOf = (name) => (name || "XX").split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 const nextRef = (name, n) => "rTR" + initialsOf(name) + String(n).padStart(2, "0");
 const daysSince = (ts) => (ts ? Math.max(0, Math.floor((Date.now() - new Date(ts)) / 86400000)) : 0);
+const ymToDate = (s) => { if (!s) return null; if (/present|current|now/i.test(String(s))) return new Date(); const m = String(s).match(/(\d{4})(?:[-/.](\d{1,2}))?/); if (!m) return null; return new Date(Number(m[1]), m[2] ? Number(m[2]) - 1 : 0, 1); };
+const computeYears = (roles) => {
+  let u = 0, o = 0;
+  (Array.isArray(roles) ? roles : []).forEach((r) => {
+    if (!r) return;
+    const a = ymToDate(r.start); const b = ymToDate(r.end) || new Date();
+    if (!a) return; let yrs = (b - a) / (365.25 * 86400000); if (yrs < 0) yrs = 0;
+    if (r.uae) u += yrs; else o += yrs;
+  });
+  return { uae: Math.round(u * 10) / 10, out: Math.round(o * 10) / 10 };
+};
 
 function calcRate(c = {}) {
   let b = 1800;
@@ -314,9 +325,24 @@ function Extract({ lsaMode, teachersCount, existing, onSaved }) {
     setCheckRes(out);
   };
   const toB64 = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result).split(",")[1]); r.onerror = reject; r.readAsDataURL(file); });
+  const getPdfText = async (file) => {
+    try {
+      const pdfjs = await import("pdfjs-dist/build/pdf");
+      pdfjs.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      const ab = await file.arrayBuffer();
+      const pdf = await pdfjs.getDocument({ data: ab }).promise;
+      let out = "";
+      for (let p = 1; p <= pdf.numPages; p++) { const page = await pdf.getPage(p); const c = await page.getTextContent(); out += c.items.map((it) => it.str).join(" ") + "\n"; }
+      return out.trim();
+    } catch { return ""; }
+  };
   const fileToBody = async (file) => {
     const ext = (file.name.split(".").pop() || "").toLowerCase();
-    if (file.type === "application/pdf" || ext === "pdf") return { pdfBase64: await toB64(file) };
+    if (file.type === "application/pdf" || ext === "pdf") {
+      const t = await getPdfText(file);
+      if (t && t.length > 120) return { text: t };          // real text PDF → cheap text path
+      return { pdfBase64: await toB64(file) };               // scan / image PDF → vision fallback
+    }
     if ((file.type || "").startsWith("image/") || ["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) return { imageBase64: await toB64(file), mediaType: file.type || "image/jpeg" };
     if (ext === "docx") { const ab = await file.arrayBuffer(); const m = await import("mammoth/mammoth.browser"); const mammoth = m.default || m; const { value } = await mammoth.extractRawText({ arrayBuffer: ab }); return { text: value }; }
     if (ext === "doc") throw new Error("Old .doc format — save it as PDF or .docx first");
@@ -345,11 +371,13 @@ function Extract({ lsaMode, teachersCount, existing, onSaved }) {
     const table = type === "lsa" ? "lsas" : "candidates";
     if (await isDupe(table, parsed.name, parsed.email)) return "dupe";
     const cv_url = await uploadCv(file);
+    const yr = computeYears(parsed.roles);
+    const needsReview = !parsed.name || !String(parsed.name).trim() || !(parsed.roles && parsed.roles.length) || (!parsed.verbatim_experience && !parsed.verbatim_qualifications);
     if (type === "lsa") {
-      await supabase.from("lsas").insert({ name: parsed.name || "Unnamed", cert: parsed.cert || "", langs: parsed.langs || "", location: parsed.location || "", status: "Available", email: parsed.email || "", phone: parsed.phone || "", placement_fee: 1000, calc: DEFAULT_CALC, notes: [], payments: [], verbatim_experience: parsed.verbatim_experience || "", verbatim_qualifications: parsed.verbatim_qualifications || "", cv_url });
+      await supabase.from("lsas").insert({ name: parsed.name || "Unnamed", cert: parsed.cert || "", langs: parsed.langs || "", location: parsed.location || "", status: needsReview ? "Needs review" : "Available", email: parsed.email || "", phone: parsed.phone || "", placement_fee: 1000, calc: DEFAULT_CALC, notes: [], payments: [], verbatim_experience: parsed.verbatim_experience || "", verbatim_qualifications: parsed.verbatim_qualifications || "", cv_url });
       return "lsa";
     }
-    await supabase.from("candidates").insert({ ref: nextRef(parsed.name, n), name: parsed.name || "Unnamed", spec: parsed.spec || "", curriculum: parsed.curriculum || "", qual: parsed.qual || "", uae_years: Number(parsed.uae_years) || 0, out_years: Number(parsed.out_years) || 0, status: parsed.status || "New", email: parsed.email || "", phone: parsed.phone || "", location: parsed.location || "", verbatim_experience: parsed.verbatim_experience || "", verbatim_qualifications: parsed.verbatim_qualifications || "", cv_url });
+    await supabase.from("candidates").insert({ ref: nextRef(parsed.name, n), name: parsed.name || "Unnamed", spec: parsed.spec || "", curriculum: parsed.curriculum || "", qual: parsed.qual || "", uae_years: yr.uae, out_years: yr.out, status: needsReview ? "Needs review" : "New", email: parsed.email || "", phone: parsed.phone || "", location: parsed.location || "", verbatim_experience: parsed.verbatim_experience || "", verbatim_qualifications: parsed.verbatim_qualifications || "", cv_url });
     return "teacher";
   };
   const runOne = async (body) => {
@@ -369,16 +397,19 @@ function Extract({ lsaMode, teachersCount, existing, onSaved }) {
 
   const extractText = async () => {
     if (!text.trim()) return; setBusy(true); setMsg("Reading CV…"); setRes({ teacher: 0, lsa: 0, dupe: 0, failed: 0, done: 0, total: 1 });
-    try { const parsed = await runOne({ text }); const kind = await saveResult(parsed, teachersCount + 1); setRes((x) => ({ ...x, [kind]: 1, done: 1 })); setMsg("Saved."); setText(""); onSaved && onSaved(); }
+    try { const parsed = await runOne({ text, model: "sonnet" }); const kind = await saveResult(parsed, teachersCount + 1); setRes((x) => ({ ...x, [kind]: 1, done: 1 })); setMsg("Saved."); setText(""); onSaved && onSaved(); }
     catch (e) { setRes((x) => ({ ...x, failed: 1, done: 1 })); setMsg("Could not read that one."); }
     setBusy(false);
   };
   const extractFiles = async (files) => {
     const arr = Array.from(files).slice(0, 2000); setBusy(true); setRes({ teacher: 0, lsa: 0, dupe: 0, failed: 0, done: 0, total: arr.length });
+    const known = (existing || []).map((s) => (s || "").toLowerCase()).filter(Boolean);
     let n = teachersCount + 1;
     for (let i = 0; i < arr.length; i++) {
       setMsg(`Processing ${i + 1} of ${arr.length}…`);
-      try { const body = await fileToBody(arr[i]); const parsed = await runOne(body); const kind = await saveResult(parsed, n, arr[i]); if (kind === "teacher") n++; setRes((x) => ({ ...x, [kind]: x[kind] + 1, done: x.done + 1 })); }
+      const clean = arr[i].name.replace(/\.[^.]+$/, "").replace(/[_\-]+/g, " ").toLowerCase();
+      if (known.some((nm) => clean.includes(nm) || nm.split(" ").filter((w) => w.length > 2).every((w) => clean.includes(w)))) { setRes((x) => ({ ...x, dupe: x.dupe + 1, done: x.done + 1 })); continue; }
+      try { const body = await fileToBody(arr[i]); const parsed = await runOne({ ...body, model: "haiku" }); const kind = await saveResult(parsed, n, arr[i]); if (kind === "teacher") n++; setRes((x) => ({ ...x, [kind]: x[kind] + 1, done: x.done + 1 })); }
       catch (e) { setRes((x) => ({ ...x, failed: x.failed + 1, done: x.done + 1 })); }
       await new Promise((r) => setTimeout(r, 600));
     }

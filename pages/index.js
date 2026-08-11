@@ -8,7 +8,7 @@ import {
 import { supabase, hasSupabase } from "../lib/supabaseClient";
 
 const C = { ink: "#1C2230", text: "#2C3446", muted: "#7A8494", faint: "#AEB6C2", red: "#DA2A34", green: "#17915B", amber: "#C98A16", blue: "#2F6FED" };
-const STATUS_COLOR = { New: C.muted, "Needs review": C.amber, Sourcing: C.muted, Sourced: C.muted, Screened: C.blue, Submitted: C.blue, Shortlist: C.amber, Interview: C.amber, Offer: C.red, Placed: C.green, Rejected: C.red, "Not Suitable": C.red, "In Review": C.amber, Approved: C.green, Matching: C.amber, Available: C.green, Active: C.green, Paid: C.green, Open: C.green, Filled: C.blue, "On Hold": C.amber, Closed: C.muted };
+const STATUS_COLOR = { New: C.muted, "Needs review": C.amber, Sourcing: C.muted, Sourced: C.muted, Screened: C.blue, Submitted: C.blue, Shortlist: C.amber, Shortlisted: C.amber, Interview: C.amber, Offer: C.red, Placed: C.green, Rejected: C.red, "Not Suitable": C.red, "In Review": C.amber, Approved: C.green, Matching: C.amber, Available: C.green, Active: C.green, Paid: C.green, Open: C.green, Filled: C.blue, "On Hold": C.amber, Closed: C.muted };
 const fmt = (n) => new Intl.NumberFormat("en-AE").format(Number(n) || 0);
 const initialsOf = (name) => (name || "XX").split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 const nextRef = (name, n) => "rTR" + initialsOf(name) + String(n).padStart(2, "0");
@@ -148,6 +148,7 @@ export default function Page() {
   const [gq, setGq] = useState("");
   const [selT, setSelT] = useState(null);
   const [selL, setSelL] = useState(null);
+  const [selV, setSelV] = useState(null);
   const [bellOpen, setBellOpen] = useState(false);
 
   const [teachers, setTeachers] = useState([]);
@@ -158,10 +159,11 @@ export default function Page() {
   const [tasks, setTasks] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [attendance, setAttendance] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
 
   useEffect(() => { try { if (localStorage.getItem("rt_auth") === "1") setAuthed(true); } catch {} setReady(true); }, []);
 
-  const setters = { candidates: setTeachers, lsas: setLsas, vacancies: setVacancies, pipeline: setPipeline, schools: setSchools, tasks: setTasks, bookings: setBookings, attendance: setAttendance };
+  const setters = { candidates: setTeachers, lsas: setLsas, vacancies: setVacancies, pipeline: setPipeline, schools: setSchools, tasks: setTasks, bookings: setBookings, attendance: setAttendance, submissions: setSubmissions };
   const reloadTable = async (t) => { if (!supabase) return; const { data } = await supabase.from(t).select("*").order("created_at", { ascending: false }); setters[t](data || []); };
   const loadAll = async () => { if (!supabase) return; await Promise.all(Object.keys(setters).map(reloadTable)); };
   useEffect(() => { if (authed) loadAll(); }, [authed]);
@@ -260,7 +262,8 @@ export default function Page() {
 
           {view === "t-database" && !selT && <TeacherDB teachers={teachers} onSelect={setSelT} onAdd={(r) => insertRow("candidates", r)} />}
           {view === "t-database" && selT && <TeacherProfile t={teachers.find((x) => x.id === selT)} onBack={() => setSelT(null)} onSave={(p) => updateRow("candidates", selT, p)} />}
-          {view === "t-vacancies" && <Vacancies rows={vacancies} onAdd={(r) => insertRow("vacancies", r)} onUpdate={(id, p) => updateRow("vacancies", id, p)} onDel={(id) => deleteRow("vacancies", id)} onImport={(rows) => importRows("vacancies", rows)} />}
+          {view === "t-vacancies" && !selV && <Vacancies rows={vacancies} onOpen={setSelV} onAdd={(r) => insertRow("vacancies", r)} onUpdate={(id, p) => updateRow("vacancies", id, p)} onDel={(id) => deleteRow("vacancies", id)} onImport={(rows) => importRows("vacancies", rows)} />}
+          {view === "t-vacancies" && selV && <VacancyDetail vacancy={vacancies.find((v) => v.id === selV)} candidates={teachers} subs={submissions.filter((s) => s.vacancy_id === selV)} onBack={() => setSelV(null)} onAddSub={(r) => insertRow("submissions", r)} onUpdateSub={(id, p) => updateRow("submissions", id, p)} onDelSub={(id) => deleteRow("submissions", id)} />}
           {view === "t-pipeline" && <PipelineView rows={pipeline} onAdd={(r) => insertRow("pipeline", r)} onUpdate={(id, p) => updateRow("pipeline", id, p)} onDel={(id) => deleteRow("pipeline", id)} onImport={(rows) => importRows("pipeline", rows)} />}
 
           {view === "lsa-dashboard" && <LsaDashboard lsas={lsas} go={openLeaf} />}
@@ -473,14 +476,30 @@ const TEACHER_CSV = [
 function TeacherDB({ teachers, onSelect, onAdd }) {
   const [modal, setModal] = useState(false);
   const [q, setQ] = useState("");
-  const list = teachers.filter((t) => ((t.name || "") + (t.ref || "") + (t.spec || "") + (t.status || "")).toLowerCase().includes(q.toLowerCase()));
+  const [fStatus, setFStatus] = useState("All");
+  const [fCurr, setFCurr] = useState("All");
+  const [fQual, setFQual] = useState("All");
+  const list = teachers.filter((t) => {
+    if (!((t.name || "") + (t.ref || "") + (t.spec || "") + (t.status || "")).toLowerCase().includes(q.toLowerCase())) return false;
+    if (fStatus !== "All" && (t.status || "") !== fStatus) return false;
+    if (fCurr !== "All" && !(t.curriculum || "").toLowerCase().includes(fCurr.toLowerCase())) return false;
+    if (fQual === "QTS" && !(t.qual || "").toLowerCase().includes("qts")) return false;
+    if (fQual === "PGCE" && !(t.qual || "").toLowerCase().includes("pgce")) return false;
+    return true;
+  });
   const save = (d) => { onAdd({ ...d, ref: nextRef(d.name, teachers.length + 1) }); setModal(false); };
   return (
     <div className="x-page">
       <div className="x-headrow"><div><h1 className="x-h1">Teacher database</h1><p className="x-sub">{teachers.length} teachers · UAE and outside-UAE years computed at extraction.</p></div>
         <div style={{ display: "flex", gap: 8 }}><button className="x-ghost" onClick={() => downloadCsv("teachers.csv", TEACHER_CSV, teachers)}><Download size={14} /> Download Excel</button><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New candidate</button></div>
       </div>
-      <div className="x-searchwrap" style={{ maxWidth: 380, marginBottom: 14 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Search this database…" value={q} onChange={(e) => setQ(e.target.value)} />{q && <button className="x-searchclear" onClick={() => setQ("")}><X size={13} /></button>}</div>
+      <div className="x-filterbar">
+        <div className="x-searchwrap" style={{ maxWidth: 300 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Search this database…" value={q} onChange={(e) => setQ(e.target.value)} />{q && <button className="x-searchclear" onClick={() => setQ("")}><X size={13} /></button>}</div>
+        <select className="x-input x-filtersel" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>{["All", "New", "Needs review", "Approved", "In Review", "Placed", "Not Suitable"].map((o) => <option key={o}>{o}</option>)}</select>
+        <select className="x-input x-filtersel" value={fCurr} onChange={(e) => setFCurr(e.target.value)}>{["All", "British", "IB", "American", "Indian", "MOE"].map((o) => <option key={o}>{o}</option>)}</select>
+        <select className="x-input x-filtersel" value={fQual} onChange={(e) => setFQual(e.target.value)}>{["All", "QTS", "PGCE"].map((o) => <option key={o}>{o}</option>)}</select>
+        <span className="x-filtercount">{list.length} shown</span>
+      </div>
       {list.length === 0 ? <div className="x-panel"><div className="x-empty">No teachers yet. Use Bulk Extract or New candidate.</div></div> : (
         <div className="x-tablewrap"><table className="x-table">
           <thead><tr><th>Ref</th><th>Name</th><th>Role</th><th className="r">UAE</th><th className="r">Outside</th><th>Qual</th><th>Status</th><th></th></tr></thead>
@@ -557,14 +576,26 @@ function LsaDashboard({ lsas, go }) {
 function LsaDirectory({ lsas, onSelect, onAdd }) {
   const [modal, setModal] = useState(false);
   const [q, setQ] = useState("");
-  const list = lsas.filter((l) => ((l.name || "") + (l.cert || "") + (l.langs || "") + (l.location || "")).toLowerCase().includes(q.toLowerCase()));
+  const [fStatus, setFStatus] = useState("All");
+  const [fCert, setFCert] = useState("All");
+  const list = lsas.filter((l) => {
+    if (!((l.name || "") + (l.cert || "") + (l.langs || "") + (l.location || "")).toLowerCase().includes(q.toLowerCase())) return false;
+    if (fStatus !== "All" && (l.status || "") !== fStatus) return false;
+    if (fCert !== "All" && !(l.cert || "").toLowerCase().includes(fCert.toLowerCase())) return false;
+    return true;
+  });
   const save = (d) => { onAdd({ ...d, calc: DEFAULT_CALC, notes: [], payments: [] }); setModal(false); };
   return (
     <div className="x-page">
       <div className="x-headrow"><div><h1 className="x-h1">LSA directory</h1><p className="x-sub">Click any LSA to view and edit their profile, notes and payments.</p></div>
         <div style={{ display: "flex", gap: 8 }}><button className="x-ghost" onClick={() => downloadCsv("lsas.csv", LSA_CSV, lsas)}><Download size={14} /> Download Excel</button><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New LSA</button></div>
       </div>
-      <div className="x-searchwrap" style={{ maxWidth: 380, marginBottom: 14 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Search LSAs…" value={q} onChange={(e) => setQ(e.target.value)} />{q && <button className="x-searchclear" onClick={() => setQ("")}><X size={13} /></button>}</div>
+      <div className="x-filterbar">
+        <div className="x-searchwrap" style={{ maxWidth: 300 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Search LSAs…" value={q} onChange={(e) => setQ(e.target.value)} />{q && <button className="x-searchclear" onClick={() => setQ("")}><X size={13} /></button>}</div>
+        <select className="x-input x-filtersel" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>{["All", "Available", "Matching", "Placed", "Needs review"].map((o) => <option key={o}>{o}</option>)}</select>
+        <select className="x-input x-filtersel" value={fCert} onChange={(e) => setFCert(e.target.value)}>{["All", "ABAT", "SEN diploma", "Level 3"].map((o) => <option key={o}>{o}</option>)}</select>
+        <span className="x-filtercount">{list.length} shown</span>
+      </div>
       {list.length === 0 ? <div className="x-panel"><div className="x-empty">No LSAs yet. Add one, or use Add LSAs to extract from CVs.</div></div> : (
         <div className="x-cards">{list.map((l) => <button key={l.id} className="x-lcard" onClick={() => onSelect(l.id)}><div className="x-lctop"><span className="x-lname">{l.name}</span><Pill s={l.status} /></div><div className="x-lrow"><Heart size={13} color={C.red} /> {l.cert || "—"}</div><div className="x-lrow"><Users size={13} color={C.muted} /> {l.langs || "—"}</div><div className="x-lrow"><MapPin size={13} color={C.muted} /> {l.location || "—"}</div><div className="x-lcfoot"><span className="x-lfee nums">AED {fmt(calcRate(l.calc))}<span className="x-lper">/mo</span></span><ChevronRight size={15} color={C.faint} /></div></button>)}</div>
       )}
@@ -668,7 +699,7 @@ const VAC_FIELDS = [
   { key: "notes", label: "Notes", type: "textarea", full: true },
 ];
 const VAC_CSV = [{ label: "Role", key: "role" }, { label: "School", key: "school" }, { label: "Contact", key: "contact" }, { label: "Level", key: "level" }, { label: "Qualification", key: "qualification" }, { label: "Budget", key: "budget" }, { label: "Status", key: "status" }, { label: "Days open", get: (r) => daysSince(r.created_at) }, { label: "Shortlist", key: "shortlist" }, { label: "Notes", key: "notes" }];
-function Vacancies({ rows, onAdd, onUpdate, onDel, onImport }) {
+function Vacancies({ rows, onOpen, onAdd, onUpdate, onDel, onImport }) {
   const [filter, setFilter] = useState("All"); const [modal, setModal] = useState(false);
   const tone = (d) => (d > 7 ? C.red : d > 4 ? C.amber : C.muted);
   const cycle = (r) => { const i = VAC_STATUSES.indexOf(r.status || "Open"); onUpdate(r.id, { status: VAC_STATUSES[(i + 1) % VAC_STATUSES.length] }); };
@@ -694,7 +725,7 @@ function Vacancies({ rows, onAdd, onUpdate, onDel, onImport }) {
               <td><select className="x-cellsel" value={v.status || "Open"} onChange={(e) => onUpdate(v.id, { status: e.target.value })} style={{ color: sc, fontWeight: 700 }}>{VAC_STATUSES.map((s) => <option key={s}>{s}</option>)}</select></td>
               <td className="r nums" style={{ color: tone(d), fontWeight: 600 }}>{d}d</td>
               <td className="r"><input className="x-cellinput nums" style={{ textAlign: "right", width: 46 }} defaultValue={v.shortlist || 0} onBlur={(e) => onUpdate(v.id, { shortlist: Number(e.target.value) || 0 })} /></td>
-              <td className="rowact"><button className="x-ic" onClick={() => onDel(v.id)}><Trash2 size={13} /></button></td>
+              <td className="rowact"><button className="x-ghost" style={{ padding: "5px 9px" }} onClick={() => onOpen(v.id)}>Candidates <ChevronRight size={13} /></button><button className="x-ic" onClick={() => onDel(v.id)}><Trash2 size={13} /></button></td>
             </tr>
           ); })}</tbody>
         </table></div>
@@ -715,6 +746,45 @@ const PIPE_FIELDS = [
   { key: "follow_ups", label: "Follow-ups (count)", type: "number" }, { key: "priority", label: "Priority", type: "checkbox" },
   { key: "notes", label: "Notes", type: "textarea", full: true },
 ];
+const SUB_STAGES = ["Submitted", "Shortlisted", "Interview", "Offer", "Rejected", "Placed"];
+function VacancyDetail({ vacancy, candidates, subs, onBack, onAddSub, onUpdateSub, onDelSub }) {
+  const [pick, setPick] = useState("");
+  if (!vacancy) return null;
+  const already = new Set(subs.map((s) => s.candidate_id));
+  const matches = pick.trim() ? candidates.filter((c) => !already.has(c.id) && ((c.name || "") + (c.ref || "") + (c.spec || "")).toLowerCase().includes(pick.toLowerCase())).slice(0, 6) : [];
+  const add = (c) => { onAddSub({ vacancy_id: vacancy.id, candidate_id: c.id, candidate_name: c.name, candidate_ref: c.ref || "", stage: "Submitted", date: new Date().toISOString().slice(0, 10), notes: "" }); setPick(""); };
+  const count = (st) => subs.filter((s) => s.stage === st).length;
+  return (
+    <div className="x-page">
+      <button className="x-back" onClick={onBack}><ArrowLeft size={15} /> Back to vacancies</button>
+      <div className="x-profhead"><div><h1 className="x-h1">{vacancy.role || "Vacancy"}</h1><div className="x-sub">{vacancy.school || "—"}{vacancy.contact ? " · " + vacancy.contact : ""} · <Pill s={vacancy.status || "Open"} /></div></div></div>
+      <div className="x-stats" style={{ gridTemplateColumns: "repeat(6,1fr)" }}>
+        {SUB_STAGES.map((st) => <div key={st} className="x-stat"><span className="x-statbar" style={{ background: STATUS_COLOR[st] }} /><div className="x-statv">{count(st)}</div><div className="x-statl">{st}</div></div>)}
+      </div>
+      <div className="x-panel">
+        <div className="x-panelhead"><h2 className="x-h2">Add a candidate to this vacancy</h2></div>
+        <div className="x-searchwrap" style={{ maxWidth: 420 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Search your database to attach a candidate…" value={pick} onChange={(e) => setPick(e.target.value)} />{pick && <button className="x-searchclear" onClick={() => setPick("")}><X size={13} /></button>}</div>
+        {matches.length > 0 && <div className="x-picklist">{matches.map((c) => <button key={c.id} className="x-bellitem" onClick={() => add(c)}><span className="x-searchrow"><span className="x-ref">{c.ref || "—"}</span><span className="x-bellt">{c.name}</span></span><span className="x-bellm">{c.spec || ""}</span></button>)}</div>}
+      </div>
+      <div className="x-tablewrap">
+        <table className="x-table"><thead><tr><th>Ref</th><th>Candidate</th><th>Stage</th><th>Notes</th><th>Date</th><th></th></tr></thead>
+          <tbody>
+            {subs.length === 0 && <tr><td colSpan={6} className="x-empty">No candidates attached yet. Search above to add the ones you submitted.</td></tr>}
+            {subs.map((s) => <tr key={s.id}>
+              <td><span className="x-ref">{s.candidate_ref || "—"}</span></td>
+              <td className="b">{s.candidate_name}</td>
+              <td><select className="x-cellsel" value={s.stage || "Submitted"} onChange={(e) => onUpdateSub(s.id, { stage: e.target.value })} style={{ color: STATUS_COLOR[s.stage || "Submitted"] }}>{SUB_STAGES.map((x) => <option key={x}>{x}</option>)}</select></td>
+              <td><input className="x-cellinput" defaultValue={s.notes || ""} onBlur={(e) => onUpdateSub(s.id, { notes: e.target.value })} /></td>
+              <td className="nums">{s.date}</td>
+              <td className="rowact"><button className="x-ic" onClick={() => onDelSub(s.id)}><Trash2 size={13} /></button></td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function PipelineView({ rows, onAdd, onUpdate, onDel, onImport }) {
   const [modal, setModal] = useState(false); const [filter, setFilter] = useState("All");
   const shown = rows.filter((r) => filter === "All" || (r.stage || "Sourcing") === filter);

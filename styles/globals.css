@@ -261,3 +261,12 @@ textarea.x-input { resize: vertical; }
 .x-bellm { font-size: 11px; color: #7A8494; }
 .x-bellempty { font-size: 13px; color: #7A8494; padding: 18px; text-align: center; }
 @media (max-width: 680px){ .x-formgrid { grid-template-columns: 1fr; } .x-belldrop { width: 280px; } }
+
+/* global search */
+.x-searchbox { position: relative; }
+.x-searchwrap { position: relative; }
+.x-searchclear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; border: none; background: #EDEFF3; border-radius: 50%; display: grid; place-items: center; color: #7A8494; cursor: pointer; }
+.x-searchclear:hover { background: #E0E3E9; color: #2C3446; }
+.x-searchdrop { position: absolute; top: 46px; left: 0; width: min(460px, 60vw); max-height: 420px; overflow-y: auto; background: #fff; border: 1px solid #E8EAEF; border-radius: 12px; box-shadow: 0 12px 40px rgba(28,34,48,.16); z-index: 60; padding: 8px; }
+.x-searchrow { display: flex; align-items: center; gap: 8px; }
+.x-searchtype { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; padding: 2px 7px; border-radius: 20px; flex-shrink: 0; }

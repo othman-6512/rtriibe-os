@@ -1,6 +1,8 @@
 // Server-side proxy to the Anthropic API. Keeps ANTHROPIC_API_KEY secret.
 // Accepts either { text } (pasted CV text) or { pdfBase64 } (a PDF file).
 
+export const config = { maxDuration: 60 };
+
 const MODEL = "claude-sonnet-5"; // change here if you ever need a different model
 
 const PROMPT = `You are a recruitment CV parser for rTriibe, a UAE education recruitment agency.

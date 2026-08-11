@@ -41,15 +41,15 @@ export default async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY is not set in Vercel." });
 
-  const { text, pdfBase64 } = req.body || {};
-  if (!text && !pdfBase64) return res.status(400).json({ error: "Send { text } or { pdfBase64 }." });
+  const { text, pdfBase64, imageBase64, mediaType } = req.body || {};
+  if (!text && !pdfBase64 && !imageBase64) return res.status(400).json({ error: "Send { text }, { pdfBase64 } or { imageBase64 }." });
 
   const content = [];
   if (pdfBase64) {
-    content.push({
-      type: "document",
-      source: { type: "base64", media_type: "application/pdf", data: pdfBase64 },
-    });
+    content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } });
+  }
+  if (imageBase64) {
+    content.push({ type: "image", source: { type: "base64", media_type: mediaType || "image/jpeg", data: imageBase64 } });
   }
   content.push({ type: "text", text: text ? PROMPT + "\n\nCV:\n" + text : PROMPT });
 

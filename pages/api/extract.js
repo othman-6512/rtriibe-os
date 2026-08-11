@@ -3,7 +3,7 @@
 
 export const config = { maxDuration: 60 };
 
-const MODEL = "claude-sonnet-5"; // change here if you ever need a different model
+const MODELS = { haiku: "claude-haiku-4-5-20251001", sonnet: "claude-sonnet-5" };
 
 const PROMPT = `You are a recruitment CV parser for rTriibe, a UAE education recruitment agency.
 Read the CV and return ONE JSON object and nothing else — no preamble, no markdown fences.
@@ -19,20 +19,18 @@ Return exactly these keys:
   "spec": "subject or role, e.g. Secondary Maths / EYFS / KS2 / LSA",
   "curriculum": "British / IB / American / etc, or empty",
   "qual": "headline qualifications, e.g. PGCE, QTS, BEd",
-  "uae_years": 0,
-  "out_years": 0,
   "cert": "for LSAs: ABAT / SEN diploma / Level 3 TA etc, else empty",
   "langs": "languages spoken, comma separated",
   "location": "current city/area if stated",
-  "status": "New",
+  "roles": [ { "school": "employer name", "uae": true, "start": "YYYY-MM", "end": "YYYY-MM or present" } ],
   "verbatim_experience": "the full work-experience section copied EXACTLY as written on the CV, roles, dates and bullet points, no summarising",
   "verbatim_qualifications": "the education/qualifications section copied EXACTLY as written on the CV"
 }
 
 Rules:
-- uae_years and out_years: read each role's dates and location, then compute total years worked INSIDE the UAE vs OUTSIDE the UAE. Return numbers (decimals allowed). Do not guess a single number — add up the role durations.
+- roles: one entry per job held. Set "uae" true only if that job was located in the UAE, false otherwise. Copy the dates exactly as on the CV, formatted YYYY-MM (or YYYY if only the year is given). Use "present" for a current role's end.
 - Copy verbatim_experience and verbatim_qualifications word-for-word from the CV. Do not paraphrase.
-- If a field is unknown, use an empty string or 0.
+- If a field is unknown, use an empty string or empty array.
 Return only the JSON object.`;
 
 export default async function handler(req, res) {
@@ -41,8 +39,9 @@ export default async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY is not set in Vercel." });
 
-  const { text, pdfBase64, imageBase64, mediaType } = req.body || {};
+  const { text, pdfBase64, imageBase64, mediaType, model } = req.body || {};
   if (!text && !pdfBase64 && !imageBase64) return res.status(400).json({ error: "Send { text }, { pdfBase64 } or { imageBase64 }." });
+  const chosenModel = MODELS[model] || MODELS.haiku;
 
   const content = [];
   if (pdfBase64) {
@@ -62,7 +61,7 @@ export default async function handler(req, res) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: chosenModel,
         max_tokens: 3000,
         messages: [{ role: "user", content }],
       }),

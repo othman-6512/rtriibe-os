@@ -4,6 +4,7 @@ import {
   Wallet, Search, Plus, Bell, Download, ChevronRight, ChevronDown, X,
   Mail, Pencil, Check, Trash2, MapPin, Users, Briefcase, CreditCard,
   StickyNote, ArrowLeft, ShieldAlert, CheckCircle2, Sparkles, Star, Clock,
+  Receipt, AlertTriangle, Calendar,
 } from "lucide-react";
 import { supabase, hasSupabase } from "../lib/supabaseClient";
 
@@ -87,7 +88,8 @@ function importCsv(file, map, cb) {
 const NAV = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, kind: "leaf" },
   { id: "extract", label: "Bulk Extract", icon: UploadCloud, kind: "leaf", badge: "CV" },
-  { id: "g-teachers", label: "Teachers", icon: GraduationCap, kind: "group", items: [{ id: "t-database", label: "Database" }, { id: "t-vacancies", label: "Vacancies" }, { id: "t-pipeline", label: "Pipeline" }] },
+  { id: "finance", label: "Finance", icon: Receipt, kind: "leaf" },
+  { id: "g-teachers", label: "Teachers", icon: GraduationCap, kind: "group", items: [{ id: "t-database", label: "Database" }, { id: "t-vacancies", label: "Vacancies" }, { id: "t-pipeline", label: "Pipeline" }, { id: "t-covers", label: "Covers" }] },
   { id: "g-lsas", label: "LSAs", icon: Heart, kind: "group", items: [{ id: "lsa-dashboard", label: "LSA Dashboard" }, { id: "lsa-directory", label: "Directory" }, { id: "lsa-bookings", label: "Bookings" }, { id: "lsa-attendance", label: "Attendance" }, { id: "lsa-add", label: "Add LSAs" }] },
   { id: "g-tasks", label: "Tasks", icon: ListChecks, kind: "group", items: [{ id: "tasks-todo", label: "To-do" }, { id: "tasks-log", label: "Daily log" }] },
   { id: "g-schools", label: "Schools", icon: Building2, kind: "group", items: [{ id: "schools-list", label: "School list" }] },
@@ -160,10 +162,11 @@ export default function Page() {
   const [bookings, setBookings] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [submissions, setSubmissions] = useState([]);
+  const [covers, setCovers] = useState([]);
 
   useEffect(() => { try { if (localStorage.getItem("rt_auth") === "1") setAuthed(true); } catch {} setReady(true); }, []);
 
-  const setters = { candidates: setTeachers, lsas: setLsas, vacancies: setVacancies, pipeline: setPipeline, schools: setSchools, tasks: setTasks, bookings: setBookings, attendance: setAttendance, submissions: setSubmissions };
+  const setters = { candidates: setTeachers, lsas: setLsas, vacancies: setVacancies, pipeline: setPipeline, schools: setSchools, tasks: setTasks, bookings: setBookings, attendance: setAttendance, submissions: setSubmissions, covers: setCovers };
   const reloadTable = async (t) => { if (!supabase) return; const { data } = await supabase.from(t).select("*").order("created_at", { ascending: false }); setters[t](data || []); };
   const loadAll = async () => { if (!supabase) return; await Promise.all(Object.keys(setters).map(reloadTable)); };
   useEffect(() => { if (authed) loadAll(); }, [authed]);
@@ -172,6 +175,32 @@ export default function Page() {
   const insertRow = async (table, row) => { if (!supabase) return; const { error } = await supabase.from(table).insert(row); if (error) alert("Add failed: " + error.message); reloadTable(table); };
   const deleteRow = async (table, id) => { if (!supabase) return; const { error } = await supabase.from(table).delete().eq("id", id); if (error) alert("Delete failed: " + error.message); reloadTable(table); };
   const importRows = async (table, rows) => { if (!supabase) return; if (!rows.length) { alert("No rows found in that file."); return; } const { error } = await supabase.from(table).insert(rows); if (error) { alert("Import failed: " + error.message); return; } reloadTable(table); alert("Imported " + rows.length + " rows."); };
+
+  const SUB_TO_PIPE = { Submitted: "Submitted", Shortlisted: "Submitted", Interview: "Interview", Offer: "Offer", Rejected: "Rejected", Placed: "Placed" };
+  const addSubmission = async (vacancy, c) => {
+    if (!supabase || !vacancy) return;
+    await supabase.from("submissions").insert({ vacancy_id: vacancy.id, candidate_id: c.id, candidate_name: c.name, candidate_ref: c.ref || "", stage: "Submitted", date: new Date().toISOString().slice(0, 10), notes: "" });
+    await supabase.from("pipeline").insert({ candidate_name: c.name, candidate_ref: c.ref || "", school: vacancy.school || "", role: vacancy.role || "", stage: "Submitted", vacancy_id: vacancy.id, candidate_id: c.id, from_vacancy: true });
+    reloadTable("submissions"); reloadTable("pipeline");
+  };
+  const updateSubmission = async (sub, patch) => {
+    if (!supabase) return;
+    await supabase.from("submissions").update(patch).eq("id", sub.id);
+    if (patch.stage) await supabase.from("pipeline").update({ stage: SUB_TO_PIPE[patch.stage] || patch.stage }).eq("vacancy_id", sub.vacancy_id).eq("candidate_id", sub.candidate_id);
+    reloadTable("submissions"); reloadTable("pipeline");
+  };
+  const delSubmission = async (sub) => {
+    if (!supabase) return;
+    await supabase.from("submissions").delete().eq("id", sub.id);
+    await supabase.from("pipeline").delete().eq("vacancy_id", sub.vacancy_id).eq("candidate_id", sub.candidate_id).eq("from_vacancy", true);
+    reloadTable("submissions"); reloadTable("pipeline");
+  };
+  const updatePipelineRow = async (row, patch) => {
+    if (!supabase) return;
+    await supabase.from("pipeline").update(patch).eq("id", row.id);
+    if (patch.stage && row.from_vacancy && row.vacancy_id && row.candidate_id) await supabase.from("submissions").update({ stage: patch.stage }).eq("vacancy_id", row.vacancy_id).eq("candidate_id", row.candidate_id);
+    reloadTable("pipeline"); reloadTable("submissions");
+  };
 
   const openLeaf = (id) => { setSelT(null); setSelL(null); setBellOpen(false); setView(id); };
 
@@ -262,9 +291,12 @@ export default function Page() {
 
           {view === "t-database" && !selT && <TeacherDB teachers={teachers} onSelect={setSelT} onAdd={(r) => insertRow("candidates", r)} />}
           {view === "t-database" && selT && <TeacherProfile t={teachers.find((x) => x.id === selT)} onBack={() => setSelT(null)} onSave={(p) => updateRow("candidates", selT, p)} />}
+          {view === "finance" && <Finance vacancies={vacancies} covers={covers} onUpdate={(id, p) => updateRow("vacancies", id, p)} />}
+
           {view === "t-vacancies" && !selV && <Vacancies rows={vacancies} onOpen={setSelV} onAdd={(r) => insertRow("vacancies", r)} onUpdate={(id, p) => updateRow("vacancies", id, p)} onDel={(id) => deleteRow("vacancies", id)} onImport={(rows) => importRows("vacancies", rows)} />}
-          {view === "t-vacancies" && selV && <VacancyDetail vacancy={vacancies.find((v) => v.id === selV)} candidates={teachers} subs={submissions.filter((s) => s.vacancy_id === selV)} onBack={() => setSelV(null)} onAddSub={(r) => insertRow("submissions", r)} onUpdateSub={(id, p) => updateRow("submissions", id, p)} onDelSub={(id) => deleteRow("submissions", id)} />}
-          {view === "t-pipeline" && <PipelineView rows={pipeline} onAdd={(r) => insertRow("pipeline", r)} onUpdate={(id, p) => updateRow("pipeline", id, p)} onDel={(id) => deleteRow("pipeline", id)} onImport={(rows) => importRows("pipeline", rows)} />}
+          {view === "t-vacancies" && selV && <VacancyDetail vacancy={vacancies.find((v) => v.id === selV)} candidates={teachers} subs={submissions.filter((s) => s.vacancy_id === selV)} onBack={() => setSelV(null)} onAddSub={addSubmission} onUpdateSub={updateSubmission} onDelSub={delSubmission} />}
+          {view === "t-covers" && <Covers rows={covers} teachers={teachers} onAdd={(r) => insertRow("covers", r)} onUpdate={(id, p) => updateRow("covers", id, p)} onDel={(id) => deleteRow("covers", id)} />}
+          {view === "t-pipeline" && <PipelineView rows={pipeline} vacancies={vacancies} onAdd={(r) => insertRow("pipeline", r)} onUpdate={updatePipelineRow} onDel={(id) => deleteRow("pipeline", id)} onImport={(rows) => importRows("pipeline", rows)} />}
 
           {view === "lsa-dashboard" && <LsaDashboard lsas={lsas} go={openLeaf} />}
           {view === "lsa-directory" && !selL && <LsaDirectory lsas={lsas} onSelect={setSelL} onAdd={(r) => insertRow("lsas", r)} />}
@@ -716,9 +748,10 @@ function Vacancies({ rows, onOpen, onAdd, onUpdate, onDel, onImport }) {
       </div>
       <div className="x-filters" style={{ marginBottom: 16 }}>{["All", ...VAC_STATUSES].map((s) => <button key={s} className={"x-chip" + (filter === s ? " on" : "")} onClick={() => setFilter(s)}>{s}</button>)}</div>
       {shown.length === 0 ? <div className="x-panel"><div className="x-empty">No vacancies here. Press New vacancy, or import your CSV in Supabase.</div></div> : (
-        <div className="x-tablewrap"><table className="x-table"><thead><tr><th>Role</th><th>School</th><th>Contact</th><th>Status</th><th className="r">Days</th><th className="r">Shortlist</th><th></th></tr></thead>
-          <tbody>{shown.map((v) => { const d = daysSince(v.created_at); const sc = STATUS_COLOR[v.status || "Open"]; return (
-            <tr key={v.id}>
+        <div className="x-tablewrap"><table className="x-table"><thead><tr><th style={{ width: 22 }}></th><th>Role</th><th>School</th><th>Contact</th><th>Status</th><th className="r">Days</th><th className="r">Shortlist</th><th></th></tr></thead>
+          <tbody>{shown.map((v) => { const d = daysSince(v.created_at); const sc = STATUS_COLOR[v.status || "Open"]; const err = !(v.role || "").trim() ? "Missing role" : !(v.school || "").trim() ? "Missing school" : ""; return (
+            <tr key={v.id} className={err ? "x-rowerr" : ""}>
+              <td>{err && <span title={err}><AlertTriangle size={15} color={C.red} /></span>}</td>
               <td><input className="x-cellinput b" defaultValue={v.role || ""} onBlur={(e) => onUpdate(v.id, { role: e.target.value })} /></td>
               <td><input className="x-cellinput" defaultValue={v.school || ""} onBlur={(e) => onUpdate(v.id, { school: e.target.value })} /></td>
               <td><input className="x-cellinput" defaultValue={v.contact || ""} onBlur={(e) => onUpdate(v.id, { contact: e.target.value })} /></td>
@@ -752,7 +785,7 @@ function VacancyDetail({ vacancy, candidates, subs, onBack, onAddSub, onUpdateSu
   if (!vacancy) return null;
   const already = new Set(subs.map((s) => s.candidate_id));
   const matches = pick.trim() ? candidates.filter((c) => !already.has(c.id) && ((c.name || "") + (c.ref || "") + (c.spec || "")).toLowerCase().includes(pick.toLowerCase())).slice(0, 6) : [];
-  const add = (c) => { onAddSub({ vacancy_id: vacancy.id, candidate_id: c.id, candidate_name: c.name, candidate_ref: c.ref || "", stage: "Submitted", date: new Date().toISOString().slice(0, 10), notes: "" }); setPick(""); };
+  const add = (c) => { onAddSub(vacancy, c); setPick(""); };
   const count = (st) => subs.filter((s) => s.stage === st).length;
   return (
     <div className="x-page">
@@ -762,7 +795,7 @@ function VacancyDetail({ vacancy, candidates, subs, onBack, onAddSub, onUpdateSu
         {SUB_STAGES.map((st) => <div key={st} className="x-stat"><span className="x-statbar" style={{ background: STATUS_COLOR[st] }} /><div className="x-statv">{count(st)}</div><div className="x-statl">{st}</div></div>)}
       </div>
       <div className="x-panel">
-        <div className="x-panelhead"><h2 className="x-h2">Add a candidate to this vacancy</h2></div>
+        <div className="x-panelhead"><h2 className="x-h2">Add a candidate to this vacancy</h2><span className="x-pmeta">Auto-syncs to the pipeline</span></div>
         <div className="x-searchwrap" style={{ maxWidth: 420 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Search your database to attach a candidate…" value={pick} onChange={(e) => setPick(e.target.value)} />{pick && <button className="x-searchclear" onClick={() => setPick("")}><X size={13} /></button>}</div>
         {matches.length > 0 && <div className="x-picklist">{matches.map((c) => <button key={c.id} className="x-bellitem" onClick={() => add(c)}><span className="x-searchrow"><span className="x-ref">{c.ref || "—"}</span><span className="x-bellt">{c.name}</span></span><span className="x-bellm">{c.spec || ""}</span></button>)}</div>}
       </div>
@@ -773,10 +806,10 @@ function VacancyDetail({ vacancy, candidates, subs, onBack, onAddSub, onUpdateSu
             {subs.map((s) => <tr key={s.id}>
               <td><span className="x-ref">{s.candidate_ref || "—"}</span></td>
               <td className="b">{s.candidate_name}</td>
-              <td><select className="x-cellsel" value={s.stage || "Submitted"} onChange={(e) => onUpdateSub(s.id, { stage: e.target.value })} style={{ color: STATUS_COLOR[s.stage || "Submitted"] }}>{SUB_STAGES.map((x) => <option key={x}>{x}</option>)}</select></td>
-              <td><input className="x-cellinput" defaultValue={s.notes || ""} onBlur={(e) => onUpdateSub(s.id, { notes: e.target.value })} /></td>
+              <td><select className="x-cellsel" value={s.stage || "Submitted"} onChange={(e) => onUpdateSub(s, { stage: e.target.value })} style={{ color: STATUS_COLOR[s.stage || "Submitted"] }}>{SUB_STAGES.map((x) => <option key={x}>{x}</option>)}</select></td>
+              <td><input className="x-cellinput" defaultValue={s.notes || ""} onBlur={(e) => onUpdateSub(s, { notes: e.target.value })} /></td>
               <td className="nums">{s.date}</td>
-              <td className="rowact"><button className="x-ic" onClick={() => onDelSub(s.id)}><Trash2 size={13} /></button></td>
+              <td className="rowact"><button className="x-ic" onClick={() => onDelSub(s)}><Trash2 size={13} /></button></td>
             </tr>)}
           </tbody>
         </table>
@@ -785,12 +818,14 @@ function VacancyDetail({ vacancy, candidates, subs, onBack, onAddSub, onUpdateSu
   );
 }
 
-function PipelineView({ rows, onAdd, onUpdate, onDel, onImport }) {
+function PipelineView({ rows, vacancies, onAdd, onUpdate, onDel, onImport }) {
   const [modal, setModal] = useState(false); const [filter, setFilter] = useState("All");
   const shown = rows.filter((r) => filter === "All" || (r.stage || "Sourcing") === filter);
+  const vIds = new Set((vacancies || []).map((v) => v.id));
+  const pErr = (p) => !(p.candidate_name || "").trim() ? "Missing candidate" : !(p.stage || "").trim() ? "Missing stage" : (p.from_vacancy && p.vacancy_id && !vIds.has(p.vacancy_id) ? "Linked vacancy removed" : "");
   return (
     <div className="x-page">
-      <div className="x-headrow"><div><h1 className="x-h1">Pipeline</h1><p className="x-sub">Every deal. Change stage right in the row.</p></div>
+      <div className="x-headrow"><div><h1 className="x-h1">Pipeline</h1><p className="x-sub">Every deal. Change stage right in the row. Deals from vacancies stay in sync.</p></div>
         <div style={{ display: "flex", gap: 8 }}>
           <input id="pipe-import" type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; if (f) importCsv(f, PIPE_MAP, onImport); e.target.value = ""; }} />
           <button className="x-ghost" onClick={() => document.getElementById("pipe-import").click()}><UploadCloud size={14} /> Import CSV</button>
@@ -798,16 +833,17 @@ function PipelineView({ rows, onAdd, onUpdate, onDel, onImport }) {
         </div>
       </div>
       <div className="x-filters" style={{ marginBottom: 16 }}>{["All", ...PIPE_STAGES].map((s) => <button key={s} className={"x-chip" + (filter === s ? " on" : "")} onClick={() => setFilter(s)}>{s}</button>)}</div>
-      {shown.length === 0 ? <div className="x-panel"><div className="x-empty">Pipeline is empty. Press New deal, or import your CSV in Supabase.</div></div> : (
-        <div className="x-tablewrap"><table className="x-table"><thead><tr><th>School</th><th>Candidate</th><th>Role</th><th>Stage</th><th>Next action</th><th className="r">Follow-ups</th><th></th></tr></thead>
-          <tbody>{shown.map((p) => <tr key={p.id}>
+      {shown.length === 0 ? <div className="x-panel"><div className="x-empty">Pipeline is empty. Press New deal, or import your CSV.</div></div> : (
+        <div className="x-tablewrap"><table className="x-table"><thead><tr><th style={{ width: 22 }}></th><th>School</th><th>Candidate</th><th>Role</th><th>Stage</th><th>Next action</th><th className="r">Follow-ups</th><th></th></tr></thead>
+          <tbody>{shown.map((p) => { const err = pErr(p); return (<tr key={p.id} className={err ? "x-rowerr" : ""}>
+            <td>{err && <span title={err}><AlertTriangle size={15} color={C.red} /></span>}</td>
             <td className="b">{p.priority && <Star size={12} color={C.amber} fill={C.amber} style={{ verticalAlign: -1, marginRight: 4 }} />}{p.school || "—"}</td>
             <td>{p.candidate_name}</td><td>{p.role || "—"}</td>
-            <td><select className="x-cellsel" value={p.stage || "Sourcing"} onChange={(e) => onUpdate(p.id, { stage: e.target.value })} style={{ color: STATUS_COLOR[p.stage || "Sourcing"] }}>{PIPE_STAGES.map((s) => <option key={s}>{s}</option>)}</select></td>
+            <td><select className="x-cellsel" value={p.stage || "Sourcing"} onChange={(e) => onUpdate(p, { stage: e.target.value })} style={{ color: STATUS_COLOR[p.stage || "Sourcing"] }}>{PIPE_STAGES.map((s) => <option key={s}>{s}</option>)}</select></td>
             <td className="mut">{p.next_action || "—"}{p.next_action_date ? " · " + p.next_action_date : ""}</td>
             <td className="r nums">{p.follow_ups || 0}</td>
             <td className="rowact"><button className="x-ic" onClick={() => onDel(p.id)}><Trash2 size={13} /></button></td>
-          </tr>)}</tbody>
+          </tr>); })}</tbody>
         </table></div>
       )}
       {modal && <FormModal title="New deal" fields={PIPE_FIELDS} initial={{ type: "Permanent", stage: "Sourcing", follow_ups: 0 }} onClose={() => setModal(false)} onSave={(d) => { onAdd(d); setModal(false); }} />}
@@ -862,6 +898,129 @@ function DailyLog({ teachers, lsas }) {
   return <div className="x-page"><h1 className="x-h1">Daily log</h1><p className="x-sub">Recent activity across the desk.</p><div className="x-panel">{items.length === 0 ? <div className="x-empty">Nothing logged yet.</div> : items.map((t, i) => <div key={i} className="x-logrow"><span className="x-logdot" /> {t}</div>)}</div></div>;
 }
 function Simple({ title, sub }) { return <div className="x-page"><h1 className="x-h1">{title}</h1><p className="x-sub">{sub}</p><div className="x-panel"><div className="x-empty">This section is ready — it fills in as you use the desk.</div></div></div>; }
+
+/* ============================ COVERS ============================ */
+const COVER_BASE = [
+  { key: "school", label: "School" }, { key: "start_date", label: "Start date", type: "date" }, { key: "end_date", label: "End date", type: "date" },
+  { key: "day_rate", label: "Weekday rate (AED)", type: "number" }, { key: "friday_rate", label: "Friday rate (AED)", type: "number" },
+  { key: "status", label: "Status", type: "select", opts: ["Active", "Ended"] },
+];
+function Covers({ rows, teachers, onAdd, onUpdate, onDel }) {
+  const [modal, setModal] = useState(false);
+  const [openC, setOpenC] = useState(null);
+  const [day, setDay] = useState({ date: "", type: "Weekday" });
+  const tNames = (teachers || []).map((t) => t.name).filter(Boolean);
+  const fields = [tNames.length ? { key: "teacher_name", label: "Teacher", type: "select", opts: tNames } : { key: "teacher_name", label: "Teacher name" }, ...COVER_BASE];
+  const payOf = (c) => (Array.isArray(c.days) ? c.days : []).reduce((p, d) => p + (d.type === "Friday" ? Number(c.friday_rate || 0) : Number(c.day_rate || 0)), 0);
+  const cover = openC ? rows.find((r) => r.id === openC.id) : null;
+  const days = cover && Array.isArray(cover.days) ? cover.days : [];
+  const addDay = () => { if (!cover || !day.date) return; onUpdate(cover.id, { days: [...days, { id: Date.now(), date: day.date, type: day.type }] }); setDay({ date: "", type: "Weekday" }); };
+  const delDay = (id) => onUpdate(cover.id, { days: days.filter((d) => d.id !== id) });
+  return (
+    <div className="x-page">
+      <div className="x-headrow"><div><h1 className="x-h1">Covers</h1><p className="x-sub">Teacher supply / cover bookings with attendance and pay.</p></div><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New cover</button></div>
+      {rows.length === 0 ? <div className="x-panel"><div className="x-empty">No covers yet. Press New cover.</div></div> : (
+        <div className="x-tablewrap"><table className="x-table"><thead><tr><th>Teacher</th><th>School</th><th>Dates</th><th className="r">Days</th><th className="r">Pay</th><th>Status</th><th></th></tr></thead>
+          <tbody>{rows.map((c) => <tr key={c.id}>
+            <td className="b">{c.teacher_name}</td><td>{c.school || "—"}</td>
+            <td className="mut nums">{(c.start_date || "?") + " → " + (c.end_date || "?")}</td>
+            <td className="r nums">{(Array.isArray(c.days) ? c.days : []).length}</td>
+            <td className="r nums">AED {fmt(payOf(c))}</td>
+            <td><Pill s={c.status} /></td>
+            <td className="rowact"><button className="x-ghost" style={{ padding: "5px 9px" }} onClick={() => setOpenC(c)}><Calendar size={13} /> Attendance</button><button className="x-ic" onClick={() => onDel(c.id)}><Trash2 size={13} /></button></td>
+          </tr>)}</tbody>
+        </table></div>
+      )}
+      {modal && <FormModal title="New cover" fields={fields} initial={{ status: "Active", teacher_name: tNames[0] || "" }} onClose={() => setModal(false)} onSave={(d) => { onAdd({ ...d, days: [] }); setModal(false); }} />}
+      {cover && <><div className="x-scrim" onClick={() => setOpenC(null)} /><div className="x-modal lg">
+        <div className="x-modalhead"><h2 className="x-h2">{cover.teacher_name} · {cover.school}</h2><button className="x-ic" onClick={() => setOpenC(null)}><X size={16} /></button></div>
+        <div className="x-calcbig"><div><div className="x-calclabel">Days worked</div><div className="x-calcv nums">{days.length}</div></div><div className="x-calceq">=</div><div><div className="x-calclabel">Total pay</div><div className="x-calcv nums red">AED {fmt(payOf(cover))}</div></div></div>
+        <div className="x-payadd"><input className="x-input" type="date" value={day.date} onChange={(e) => setDay({ ...day, date: e.target.value })} /><select className="x-input" value={day.type} onChange={(e) => setDay({ ...day, type: e.target.value })}><option>Weekday</option><option>Friday</option></select><button className="x-primary sm" onClick={addDay}><Plus size={14} /></button></div>
+        {days.length === 0 && <div className="x-empty">No days logged.</div>}
+        {days.map((d) => <div key={d.id} className="x-payrow"><div><div className="x-notet nums">{d.date}</div><div className="x-paymeta">{d.type} · AED {fmt(d.type === "Friday" ? cover.friday_rate : cover.day_rate)}</div></div><button className="x-ic" onClick={() => delDay(d.id)}><Trash2 size={13} /></button></div>)}
+      </div></>}
+    </div>
+  );
+}
+
+/* ============================ FINANCE ============================ */
+function openInvoice(v) {
+  const fee = Number(v.fee || 0);
+  const vat = Math.round(fee * 0.05 * 100) / 100;
+  const total = fee + vat;
+  const num = "INV-" + String(Date.now()).slice(-6);
+  const date = new Date().toLocaleDateString("en-GB");
+  const money = (n) => "AED " + new Intl.NumberFormat("en-AE", { minimumFractionDigits: 2 }).format(n);
+  const esc = (s) => String(s || "").replace(/</g, "");
+  const w = window.open("", "_blank");
+  if (!w) { alert("Please allow pop-ups so the invoice can open, then try again."); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${num}</title><style>
+    *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
+    body{margin:0;padding:44px;color:#1C2230}
+    .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #DA2A34;padding-bottom:20px}
+    .brand{font-size:30px;font-weight:800}.brand span{color:#DA2A34}
+    .brand small{display:block;font-size:11px;font-weight:600;color:#7A8494;letter-spacing:2px;margin-top:3px}
+    h1{font-size:26px;color:#DA2A34;margin:0 0 6px}
+    .meta{font-size:12px;color:#555;text-align:right;line-height:1.7}
+    .parties{display:flex;justify-content:space-between;margin:30px 0}
+    .parties div{font-size:13px;line-height:1.7}
+    .lbl{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#7A8494;margin-bottom:5px}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th{background:#1C2230;color:#fff;text-align:left;padding:12px;font-size:12px}
+    th.r,td.r{text-align:right}
+    td{padding:12px;border-bottom:1px solid #eee;font-size:13px}
+    .totals{margin-top:20px;margin-left:auto;width:300px;font-size:13px}
+    .totals div{display:flex;justify-content:space-between;padding:8px 0}
+    .totals .grand{border-top:2px solid #1C2230;font-weight:800;font-size:17px;color:#DA2A34;margin-top:4px;padding-top:10px}
+    .foot{margin-top:44px;font-size:12px;color:#555;border-top:1px solid #eee;padding-top:18px;line-height:1.8}
+    .btn{margin:26px 0;padding:12px 22px;background:#DA2A34;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}
+    @media print{.btn{display:none}}
+  </style></head><body>
+    <div class="top"><div class="brand"><span>r</span>Triibe<small>FZCO &middot; EDUCATION RECRUITMENT</small></div>
+    <div><h1>INVOICE</h1><div class="meta">Invoice no: <b>${num}</b><br>Date: ${date}<br>TRN: 100452871500003</div></div></div>
+    <div class="parties"><div><div class="lbl">From</div><b>rTriibe FZCO</b><br>Dubai, United Arab Emirates<br>TRN 100452871500003</div>
+    <div style="text-align:right"><div class="lbl">Bill to</div><b>${esc(v.school) || "School"}</b><br>${esc(v.contact)}</div></div>
+    <table><thead><tr><th>Description</th><th class="r">Amount</th></tr></thead>
+    <tbody><tr><td>Recruitment placement fee &mdash; ${esc(v.role) || "Placement"}</td><td class="r">${money(fee)}</td></tr></tbody></table>
+    <div class="totals"><div><span>Subtotal</span><span>${money(fee)}</span></div><div><span>VAT (5%)</span><span>${money(vat)}</span></div><div class="grand"><span>Total due</span><span>${money(total)}</span></div></div>
+    <div class="foot">Payment terms: 30 days from invoice date. Please quote the invoice number as your payment reference.<br>Bank details: [add your rTriibe FZCO bank account here].<br>Thank you for working with rTriibe.</div>
+    <button class="btn" onclick="window.print()">Download / Print PDF</button>
+  </body></html>`);
+  w.document.close();
+}
+function Finance({ vacancies, covers, onUpdate }) {
+  const rows = vacancies || [];
+  const feeOf = (v) => Number(v.fee || 0);
+  const vatOf = (v) => Math.round(feeOf(v) * 0.05 * 100) / 100;
+  const totOf = (v) => feeOf(v) + vatOf(v);
+  const totalFees = rows.reduce((s, v) => s + feeOf(v), 0);
+  const totalVat = rows.reduce((s, v) => s + vatOf(v), 0);
+  const outstanding = rows.filter((v) => !v.paid).reduce((s, v) => s + totOf(v), 0);
+  return (
+    <div className="x-page">
+      <h1 className="x-h1">Finance</h1><p className="x-sub">Fees, 5% VAT and invoices per vacancy. Set a fee on a row, mark it paid, and download a professional invoice for the school.</p>
+      <div className="x-stats">
+        <div className="x-stat"><span className="x-statbar" style={{ background: C.blue }} /><div className="x-statv nums">AED {fmt(Math.round(totalFees))}</div><div className="x-statl">Total fees</div></div>
+        <div className="x-stat"><span className="x-statbar" style={{ background: C.amber }} /><div className="x-statv nums">AED {fmt(Math.round(totalVat))}</div><div className="x-statl">VAT (5%)</div></div>
+        <div className="x-stat"><span className="x-statbar" style={{ background: C.green }} /><div className="x-statv nums">AED {fmt(Math.round(totalFees + totalVat))}</div><div className="x-statl">Grand total</div></div>
+        <div className="x-stat"><span className="x-statbar" style={{ background: C.red }} /><div className="x-statv nums">AED {fmt(Math.round(outstanding))}</div><div className="x-statl">Outstanding</div></div>
+      </div>
+      <div className="x-tablewrap"><table className="x-table"><thead><tr><th>Vacancy</th><th>School</th><th className="r">Fee (AED)</th><th className="r">VAT 5%</th><th className="r">Total</th><th>Paid</th><th></th></tr></thead>
+        <tbody>
+          {rows.length === 0 && <tr><td colSpan={7} className="x-empty">No vacancies yet.</td></tr>}
+          {rows.map((v) => { const pc = v.paid ? C.green : C.red; return (<tr key={v.id}>
+            <td className="b">{v.role || "—"}</td><td>{v.school || "—"}</td>
+            <td className="r"><input className="x-cellinput nums" style={{ textAlign: "right", width: 92 }} defaultValue={v.fee || 0} onBlur={(e) => onUpdate(v.id, { fee: Number(e.target.value) || 0 })} /></td>
+            <td className="r nums">{fmt(vatOf(v))}</td>
+            <td className="r nums b">{fmt(totOf(v))}</td>
+            <td><button className="x-pill" style={{ cursor: "pointer", color: pc, background: pc + "16", borderColor: pc + "30" }} onClick={() => onUpdate(v.id, { paid: !v.paid })}>{v.paid ? "Paid" : "Unpaid"}</button></td>
+            <td className="rowact"><button className="x-ghost" style={{ padding: "5px 9px" }} onClick={() => openInvoice(v)}><Download size={13} /> Invoice</button></td>
+          </tr>); })}
+        </tbody>
+      </table></div>
+    </div>
+  );
+}
 
 /* ---------- shared ---------- */
 function Pill({ s }) { const c = STATUS_COLOR[s] || C.muted; return <span className="x-pill" style={{ color: c, background: c + "16", borderColor: c + "30" }}>{s || "—"}</span>; }

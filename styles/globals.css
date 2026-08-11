@@ -270,3 +270,9 @@ textarea.x-input { resize: vertical; }
 .x-searchdrop { position: absolute; top: 46px; left: 0; width: min(460px, 60vw); max-height: 420px; overflow-y: auto; background: #fff; border: 1px solid #E8EAEF; border-radius: 12px; box-shadow: 0 12px 40px rgba(28,34,48,.16); z-index: 60; padding: 8px; }
 .x-searchrow { display: flex; align-items: center; gap: 8px; }
 .x-searchtype { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; padding: 2px 7px; border-radius: 20px; flex-shrink: 0; }
+
+/* filters + vacancy detail candidate picker */
+.x-filterbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.x-filtersel { width: auto; min-width: 120px; flex: none; cursor: pointer; }
+.x-filtercount { font-size: 12px; color: #7A8494; margin-left: auto; }
+.x-picklist { margin-top: 10px; border: 1px solid #E8EAEF; border-radius: 10px; padding: 6px; max-width: 460px; }

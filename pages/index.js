@@ -134,7 +134,7 @@ export default function Page() {
   const [ready, setReady] = useState(false);
   const [view, setView] = useState("dashboard");
   const [open, setOpen] = useState({ "g-teachers": true, "g-lsas": true });
-  const [q, setQ] = useState("");
+  const [gq, setGq] = useState("");
   const [selT, setSelT] = useState(null);
   const [selL, setSelL] = useState(null);
   const [bellOpen, setBellOpen] = useState(false);
@@ -169,6 +169,16 @@ export default function Page() {
   const dueActions = pipeline.filter((p) => p.next_action && p.next_action_date && p.next_action_date <= today);
   const notifCount = pendingTasks.length + agingVac.length + dueActions.length;
 
+  const ql = gq.trim().toLowerCase();
+  const searchResults = ql ? [
+    ...teachers.filter((t) => ((t.name || "") + (t.ref || "") + (t.spec || "")).toLowerCase().includes(ql)).slice(0, 6).map((t) => ({ type: "Candidate", label: t.name, sub: (t.ref || "") + " · " + (t.spec || ""), tone: C.blue, go: () => { setSelL(null); setSelT(t.id); setView("t-database"); } })),
+    ...lsas.filter((l) => ((l.name || "") + (l.cert || "") + (l.langs || "")).toLowerCase().includes(ql)).slice(0, 6).map((l) => ({ type: "LSA", label: l.name, sub: l.cert || "", tone: C.green, go: () => { setSelT(null); setSelL(l.id); setView("lsa-directory"); } })),
+    ...vacancies.filter((v) => ((v.role || "") + (v.school || "") + (v.contact || "")).toLowerCase().includes(ql)).slice(0, 6).map((v) => ({ type: "Vacancy", label: v.role, sub: v.school || "", tone: C.red, go: () => setView("t-vacancies") })),
+    ...pipeline.filter((p) => ((p.candidate_name || "") + (p.school || "") + (p.role || "")).toLowerCase().includes(ql)).slice(0, 6).map((p) => ({ type: "Pipeline", label: p.candidate_name, sub: (p.school || "") + " · " + (p.stage || ""), tone: C.amber, go: () => setView("t-pipeline") })),
+    ...schools.filter((s) => ((s.name || "") + (s.grp || "")).toLowerCase().includes(ql)).slice(0, 4).map((s) => ({ type: "School", label: s.name, sub: s.grp || "", tone: C.muted, go: () => setView("schools-list") })),
+  ] : [];
+  const pickResult = (r) => { r.go(); setGq(""); };
+
   if (!ready) return null;
   if (!authed) return <Gate onOk={() => setAuthed(true)} />;
 
@@ -194,7 +204,23 @@ export default function Page() {
 
       <div className="x-main">
         <header className="x-top">
-          <div className="x-searchwrap"><Search size={16} color={C.muted} /><input className="x-search" placeholder="Search everything…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+          <div className="x-searchbox">
+            <div className="x-searchwrap"><Search size={16} color={C.muted} /><input className="x-search" placeholder="Search candidates, schools, vacancies, LSAs…" value={gq} onChange={(e) => setGq(e.target.value)} />{gq && <button className="x-searchclear" onClick={() => setGq("")}><X size={14} /></button>}</div>
+            {gq && (
+              <>
+                <div className="x-scrim" style={{ background: "transparent" }} onClick={() => setGq("")} />
+                <div className="x-searchdrop">
+                  {searchResults.length === 0 && <div className="x-bellempty">No matches for “{gq}”.</div>}
+                  {searchResults.map((r, i) => (
+                    <button key={i} className="x-bellitem" onClick={() => pickResult(r)}>
+                      <span className="x-searchrow"><span className="x-searchtype" style={{ color: r.tone, background: r.tone + "16" }}>{r.type}</span><span className="x-bellt">{r.label}</span></span>
+                      <span className="x-bellm">{r.sub}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <div className="x-topr">
             <button className="x-bell" onClick={() => setBellOpen((b) => !b)}><Bell size={17} />{notifCount > 0 && <span className="x-belldot">{notifCount}</span>}</button>
             {bellOpen && (
@@ -221,13 +247,13 @@ export default function Page() {
           {view === "extract" && <Extract teachersCount={teachers.length} existing={[...teachers.map((t) => t.name), ...lsas.map((l) => l.name)]} onSaved={loadAll} />}
           {view === "lsa-add" && <Extract lsaMode teachersCount={teachers.length} existing={[...teachers.map((t) => t.name), ...lsas.map((l) => l.name)]} onSaved={loadAll} />}
 
-          {view === "t-database" && !selT && <TeacherDB teachers={teachers} q={q} onSelect={setSelT} onAdd={(r) => insertRow("candidates", r)} />}
+          {view === "t-database" && !selT && <TeacherDB teachers={teachers} onSelect={setSelT} onAdd={(r) => insertRow("candidates", r)} />}
           {view === "t-database" && selT && <TeacherProfile t={teachers.find((x) => x.id === selT)} onBack={() => setSelT(null)} onSave={(p) => updateRow("candidates", selT, p)} />}
           {view === "t-vacancies" && <Vacancies rows={vacancies} onAdd={(r) => insertRow("vacancies", r)} onUpdate={(id, p) => updateRow("vacancies", id, p)} onDel={(id) => deleteRow("vacancies", id)} onImport={(rows) => importRows("vacancies", rows)} />}
           {view === "t-pipeline" && <PipelineView rows={pipeline} onAdd={(r) => insertRow("pipeline", r)} onUpdate={(id, p) => updateRow("pipeline", id, p)} onDel={(id) => deleteRow("pipeline", id)} onImport={(rows) => importRows("pipeline", rows)} />}
 
           {view === "lsa-dashboard" && <LsaDashboard lsas={lsas} go={openLeaf} />}
-          {view === "lsa-directory" && !selL && <LsaDirectory lsas={lsas} q={q} onSelect={setSelL} onAdd={(r) => insertRow("lsas", r)} />}
+          {view === "lsa-directory" && !selL && <LsaDirectory lsas={lsas} onSelect={setSelL} onAdd={(r) => insertRow("lsas", r)} />}
           {view === "lsa-directory" && selL && <LsaProfile lsa={lsas.find((x) => x.id === selL)} onBack={() => setSelL(null)} onSave={(p) => updateRow("lsas", selL, p)} />}
           {view === "lsa-bookings" && <Bookings rows={bookings} lsas={lsas} onAdd={(r) => insertRow("bookings", r)} onDel={(id) => deleteRow("bookings", id)} />}
           {view === "lsa-attendance" && <Attendance rows={attendance} lsas={lsas} onAdd={(r) => insertRow("attendance", r)} onDel={(id) => deleteRow("attendance", id)} />}
@@ -296,19 +322,42 @@ function Extract({ lsaMode, teachersCount, existing, onSaved }) {
     if (email) return data.some((r) => (r.email || "").toLowerCase() === email.toLowerCase());
     return true;
   };
-  const saveResult = async (parsed, n) => {
+  const uploadCv = async (file) => {
+    if (!file || !supabase) return "";
+    try {
+      const path = Date.now() + "-" + (file.name || "cv.pdf").replace(/[^a-zA-Z0-9.\-_]/g, "_");
+      const { error } = await supabase.storage.from("cvs").upload(path, file, { contentType: "application/pdf", upsert: false });
+      if (error) return "";
+      return supabase.storage.from("cvs").getPublicUrl(path).data.publicUrl || "";
+    } catch { return ""; }
+  };
+  const saveResult = async (parsed, n, file) => {
     if (!supabase) return "failed";
     const type = route === "auto" ? (parsed.type === "lsa" ? "lsa" : "teacher") : route;
     const table = type === "lsa" ? "lsas" : "candidates";
     if (await isDupe(table, parsed.name, parsed.email)) return "dupe";
+    const cv_url = await uploadCv(file);
     if (type === "lsa") {
-      await supabase.from("lsas").insert({ name: parsed.name || "Unnamed", cert: parsed.cert || "", langs: parsed.langs || "", location: parsed.location || "", status: "Available", email: parsed.email || "", phone: parsed.phone || "", placement_fee: 1000, calc: DEFAULT_CALC, notes: [], payments: [], verbatim_experience: parsed.verbatim_experience || "", verbatim_qualifications: parsed.verbatim_qualifications || "" });
+      await supabase.from("lsas").insert({ name: parsed.name || "Unnamed", cert: parsed.cert || "", langs: parsed.langs || "", location: parsed.location || "", status: "Available", email: parsed.email || "", phone: parsed.phone || "", placement_fee: 1000, calc: DEFAULT_CALC, notes: [], payments: [], verbatim_experience: parsed.verbatim_experience || "", verbatim_qualifications: parsed.verbatim_qualifications || "", cv_url });
       return "lsa";
     }
-    await supabase.from("candidates").insert({ ref: nextRef(parsed.name, n), name: parsed.name || "Unnamed", spec: parsed.spec || "", curriculum: parsed.curriculum || "", qual: parsed.qual || "", uae_years: Number(parsed.uae_years) || 0, out_years: Number(parsed.out_years) || 0, status: parsed.status || "New", email: parsed.email || "", phone: parsed.phone || "", location: parsed.location || "", verbatim_experience: parsed.verbatim_experience || "", verbatim_qualifications: parsed.verbatim_qualifications || "" });
+    await supabase.from("candidates").insert({ ref: nextRef(parsed.name, n), name: parsed.name || "Unnamed", spec: parsed.spec || "", curriculum: parsed.curriculum || "", qual: parsed.qual || "", uae_years: Number(parsed.uae_years) || 0, out_years: Number(parsed.out_years) || 0, status: parsed.status || "New", email: parsed.email || "", phone: parsed.phone || "", location: parsed.location || "", verbatim_experience: parsed.verbatim_experience || "", verbatim_qualifications: parsed.verbatim_qualifications || "", cv_url });
     return "teacher";
   };
-  const runOne = async (body) => { const r = await fetch("/api/extract", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); const d = await r.json(); if (!r.ok || !d.result) throw new Error(d.error || "extract failed"); return d.result; };
+  const runOne = async (body) => {
+    let lastErr;
+    for (let a = 0; a < 3; a++) {
+      try {
+        const r = await fetch("/api/extract", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.result) return d.result;
+        lastErr = new Error(d.error || ("HTTP " + r.status));
+        if (r.status && r.status !== 429 && r.status < 500) break;
+      } catch (e) { lastErr = e; }
+      await new Promise((res) => setTimeout(res, 800 * (a + 1)));
+    }
+    throw lastErr || new Error("extract failed");
+  };
 
   const extractText = async () => {
     if (!text.trim()) return; setBusy(true); setMsg("Reading CV…"); setRes({ teacher: 0, lsa: 0, dupe: 0, failed: 0, done: 0, total: 1 });
@@ -321,9 +370,9 @@ function Extract({ lsaMode, teachersCount, existing, onSaved }) {
     let n = teachersCount + 1;
     for (let i = 0; i < arr.length; i++) {
       setMsg(`Processing ${i + 1} of ${arr.length}…`);
-      try { const b64 = await toB64(arr[i]); const parsed = await runOne({ pdfBase64: b64 }); const kind = await saveResult(parsed, n); if (kind === "teacher") n++; setRes((x) => ({ ...x, [kind]: x[kind] + 1, done: x.done + 1 })); }
+      try { const b64 = await toB64(arr[i]); const parsed = await runOne({ pdfBase64: b64 }); const kind = await saveResult(parsed, n, arr[i]); if (kind === "teacher") n++; setRes((x) => ({ ...x, [kind]: x[kind] + 1, done: x.done + 1 })); }
       catch (e) { setRes((x) => ({ ...x, failed: x.failed + 1, done: x.done + 1 })); }
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 600));
     }
     setMsg("Done."); setBusy(false); onSaved && onSaved();
   };
@@ -382,15 +431,17 @@ const TEACHER_CSV = [
   { label: "Degree verified", get: (r) => (r.degree_verified ? "Yes" : "No") }, { label: "Visa clear", get: (r) => (r.visa_clear ? "Yes" : "No") }, { label: "QTS/PGCE", get: (r) => (r.qts_pgce ? "Yes" : "No") }, { label: "References", get: (r) => (r.refs_checked ? "Yes" : "No") },
   { label: "Experience (verbatim)", key: "verbatim_experience" }, { label: "Qualifications (verbatim)", key: "verbatim_qualifications" }, { label: "Notes", key: "notes" },
 ];
-function TeacherDB({ teachers, q, onSelect, onAdd }) {
+function TeacherDB({ teachers, onSelect, onAdd }) {
   const [modal, setModal] = useState(false);
-  const list = teachers.filter((t) => ((t.name || "") + (t.ref || "") + (t.spec || "")).toLowerCase().includes((q || "").toLowerCase()));
+  const [q, setQ] = useState("");
+  const list = teachers.filter((t) => ((t.name || "") + (t.ref || "") + (t.spec || "") + (t.status || "")).toLowerCase().includes(q.toLowerCase()));
   const save = (d) => { onAdd({ ...d, ref: nextRef(d.name, teachers.length + 1) }); setModal(false); };
   return (
     <div className="x-page">
       <div className="x-headrow"><div><h1 className="x-h1">Teacher database</h1><p className="x-sub">{teachers.length} teachers · UAE and outside-UAE years computed at extraction.</p></div>
         <div style={{ display: "flex", gap: 8 }}><button className="x-ghost" onClick={() => downloadCsv("teachers.csv", TEACHER_CSV, teachers)}><Download size={14} /> Download Excel</button><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New candidate</button></div>
       </div>
+      <div className="x-searchwrap" style={{ maxWidth: 380, marginBottom: 14 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Search this database…" value={q} onChange={(e) => setQ(e.target.value)} />{q && <button className="x-searchclear" onClick={() => setQ("")}><X size={13} /></button>}</div>
       {list.length === 0 ? <div className="x-panel"><div className="x-empty">No teachers yet. Use Bulk Extract or New candidate.</div></div> : (
         <div className="x-tablewrap"><table className="x-table">
           <thead><tr><th>Ref</th><th>Name</th><th>Role</th><th className="r">UAE</th><th className="r">Outside</th><th>Qual</th><th>Status</th><th></th></tr></thead>
@@ -431,7 +482,7 @@ function TeacherProfile({ t, onBack, onSave }) {
       </div>
       {d.verbatim_experience && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Experience — exactly as written on the CV</h2></div><div className="x-verbatim">{d.verbatim_experience}</div></div>}
       {d.verbatim_qualifications && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Qualifications — exactly as written</h2></div><div className="x-verbatim">{d.verbatim_qualifications}</div></div>}
-      <div className="x-profactions"><button className="x-ghost"><Download size={15} /> Download CV</button><button className="x-ghost"><Briefcase size={15} /> Match to vacancy</button><button className="x-primary"><Mail size={15} /> Send offer</button></div>
+      <div className="x-profactions"><button className="x-ghost" onClick={() => d.cv_url ? window.open(d.cv_url, "_blank") : alert("No file stored for this candidate. Re-extract the CV through the system to enable download.")}><Download size={15} /> Download CV</button><button className="x-ghost"><Briefcase size={15} /> Match to vacancy</button><button className="x-primary"><Mail size={15} /> Send offer</button></div>
     </div>
   );
 }
@@ -464,15 +515,17 @@ function LsaDashboard({ lsas, go }) {
     </div>
   );
 }
-function LsaDirectory({ lsas, q, onSelect, onAdd }) {
+function LsaDirectory({ lsas, onSelect, onAdd }) {
   const [modal, setModal] = useState(false);
-  const list = lsas.filter((l) => ((l.name || "") + (l.cert || "") + (l.langs || "")).toLowerCase().includes((q || "").toLowerCase()));
+  const [q, setQ] = useState("");
+  const list = lsas.filter((l) => ((l.name || "") + (l.cert || "") + (l.langs || "") + (l.location || "")).toLowerCase().includes(q.toLowerCase()));
   const save = (d) => { onAdd({ ...d, calc: DEFAULT_CALC, notes: [], payments: [] }); setModal(false); };
   return (
     <div className="x-page">
       <div className="x-headrow"><div><h1 className="x-h1">LSA directory</h1><p className="x-sub">Click any LSA to view and edit their profile, notes and payments.</p></div>
         <div style={{ display: "flex", gap: 8 }}><button className="x-ghost" onClick={() => downloadCsv("lsas.csv", LSA_CSV, lsas)}><Download size={14} /> Download Excel</button><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New LSA</button></div>
       </div>
+      <div className="x-searchwrap" style={{ maxWidth: 380, marginBottom: 14 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Search LSAs…" value={q} onChange={(e) => setQ(e.target.value)} />{q && <button className="x-searchclear" onClick={() => setQ("")}><X size={13} /></button>}</div>
       {list.length === 0 ? <div className="x-panel"><div className="x-empty">No LSAs yet. Add one, or use Add LSAs to extract from CVs.</div></div> : (
         <div className="x-cards">{list.map((l) => <button key={l.id} className="x-lcard" onClick={() => onSelect(l.id)}><div className="x-lctop"><span className="x-lname">{l.name}</span><Pill s={l.status} /></div><div className="x-lrow"><Heart size={13} color={C.red} /> {l.cert || "—"}</div><div className="x-lrow"><Users size={13} color={C.muted} /> {l.langs || "—"}</div><div className="x-lrow"><MapPin size={13} color={C.muted} /> {l.location || "—"}</div><div className="x-lcfoot"><span className="x-lfee nums">AED {fmt(calcRate(l.calc))}<span className="x-lper">/mo</span></span><ChevronRight size={15} color={C.faint} /></div></button>)}</div>
       )}
@@ -496,7 +549,7 @@ function LsaProfile({ lsa, onBack, onSave }) {
   return (
     <div className="x-page">
       <button className="x-back" onClick={onBack}><ArrowLeft size={15} /> Back to directory</button>
-      <div className="x-profhead"><div><h1 className="x-h1">{d.name}</h1><div className="x-sub">{d.cert} · {d.location}</div></div>{edit ? <button className="x-primary" onClick={saveProfile}><Check size={15} /> Save changes</button> : <button className="x-ghost" onClick={() => setEdit(true)}><Pencil size={14} /> Edit profile</button>}</div>
+      <div className="x-profhead"><div><h1 className="x-h1">{d.name}</h1><div className="x-sub">{d.cert} · {d.location}</div></div><div style={{ display: "flex", gap: 8 }}>{d.cv_url && <button className="x-ghost" onClick={() => window.open(d.cv_url, "_blank")}><Download size={14} /> CV</button>}{edit ? <button className="x-primary" onClick={saveProfile}><Check size={15} /> Save changes</button> : <button className="x-ghost" onClick={() => setEdit(true)}><Pencil size={14} /> Edit profile</button>}</div></div>
       <div className="x-2col">
         <div>
           <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Profile</h2></div>
@@ -599,7 +652,7 @@ function Vacancies({ rows, onAdd, onUpdate, onDel, onImport }) {
               <td><input className="x-cellinput b" defaultValue={v.role || ""} onBlur={(e) => onUpdate(v.id, { role: e.target.value })} /></td>
               <td><input className="x-cellinput" defaultValue={v.school || ""} onBlur={(e) => onUpdate(v.id, { school: e.target.value })} /></td>
               <td><input className="x-cellinput" defaultValue={v.contact || ""} onBlur={(e) => onUpdate(v.id, { contact: e.target.value })} /></td>
-              <td><button className="x-pill" style={{ color: sc, background: sc + "16", borderColor: sc + "30", cursor: "pointer" }} onClick={() => cycle(v)}>{v.status || "Open"}</button></td>
+              <td><select className="x-cellsel" value={v.status || "Open"} onChange={(e) => onUpdate(v.id, { status: e.target.value })} style={{ color: sc, fontWeight: 700 }}>{VAC_STATUSES.map((s) => <option key={s}>{s}</option>)}</select></td>
               <td className="r nums" style={{ color: tone(d), fontWeight: 600 }}>{d}d</td>
               <td className="r"><input className="x-cellinput nums" style={{ textAlign: "right", width: 46 }} defaultValue={v.shortlist || 0} onBlur={(e) => onUpdate(v.id, { shortlist: Number(e.target.value) || 0 })} /></td>
               <td className="rowact"><button className="x-ic" onClick={() => onDel(v.id)}><Trash2 size={13} /></button></td>

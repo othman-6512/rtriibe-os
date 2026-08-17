@@ -307,3 +307,14 @@ textarea.x-input { resize: vertical; }
 .x-exprow { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
 .x-exprow .x-input { margin: 0; }
 @media (max-width: 720px) { .x-cvedit { grid-template-columns: 1fr; } .x-exprow { flex-wrap: wrap; } }
+
+/* attach CVs tool */
+.x-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 40px 20px; background: #fff; border: 2px dashed #D5DAE3; border-radius: 16px; cursor: pointer; margin-bottom: 16px; }
+.x-drop:hover { border-color: #DA2A34; background: #FDF6F6; }
+.x-dropt { font-size: 15px; font-weight: 700; color: #1C2230; margin-top: 6px; }
+.x-dropm { font-size: 12px; color: #7A8494; }
+.x-note { background: #EAF2FE; border: 1px solid #C7DBFB; color: #1C3D73; font-size: 13px; font-weight: 600; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; }
+.x-assignrow { display: flex; align-items: center; gap: 14px; padding: 10px 0; border-bottom: 1px solid #F1F2F5; }
+.x-assignrow:last-child { border-bottom: none; }
+.x-assignname { flex: 1; font-size: 13px; font-weight: 600; color: #1C2230; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.x-assignpick { width: 260px; flex-shrink: 0; }

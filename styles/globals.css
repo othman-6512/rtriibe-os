@@ -318,3 +318,12 @@ textarea.x-input { resize: vertical; }
 .x-assignrow:last-child { border-bottom: none; }
 .x-assignname { flex: 1; font-size: 13px; font-weight: 600; color: #1C2230; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .x-assignpick { width: 260px; flex-shrink: 0; }
+
+/* attach progress */
+.x-progresstop { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.x-progresslbl { font-size: 13px; font-weight: 700; color: #1C2230; }
+.x-progresspct { font-size: 13px; font-weight: 800; color: #DA2A34; }
+.x-progresswrap { height: 10px; background: #EEF0F4; border-radius: 20px; overflow: hidden; }
+.x-progressbar { height: 100%; background: #DA2A34; border-radius: 20px; transition: width .2s ease; }
+.x-progressstats { display: flex; gap: 18px; margin-top: 12px; font-size: 12px; color: #5B6472; }
+.x-progressstats b { color: #1C2230; }

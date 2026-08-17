@@ -39,6 +39,31 @@ function calcRate(c = {}) {
 }
 const DEFAULT_CALC = { hours: 20, level: "Mid", qual: "Level 3", langs: 1, tier: "Standard", loc: "Dubai", needs: "Mild", contract: "3 months", urgency: "Standard" };
 
+function suggestLsaSalary(cert = "", exp = "") {
+  let s = 2500;
+  const c = String(cert).toLowerCase();
+  if (c.includes("abat")) s += 1200;
+  else if (c.includes("sen")) s += 900;
+  else if (c.includes("level 3") || c.includes("level3")) s += 500;
+  else if (c.includes("level 2") || c.includes("level2")) s += 250;
+  const m = String(exp).match(/(\d+)/);
+  s += (m ? Math.min(Number(m[1]), 15) : 0) * 150;
+  return Math.round(s / 50) * 50;
+}
+
+function PersonField({ value, people, onPick }) {
+  const [q, setQ] = useState(value || "");
+  const [open, setOpen] = useState(false);
+  useEffect(() => setQ(value || ""), [value]);
+  const matches = q.trim() ? (people || []).filter((p) => ((p.name || "") + (p.ref || "") + (p.sub || "")).toLowerCase().includes(q.toLowerCase())).slice(0, 6) : [];
+  return (
+    <div className="x-typeahead">
+      <input className="x-input" placeholder="Type a name…" value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); onPick({ name: e.target.value }); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} />
+      {open && matches.length > 0 && <div className="x-tadrop">{matches.map((p) => <button key={p.kind + p.id} className="x-taitem" onMouseDown={() => { onPick(p); setQ(p.name); setOpen(false); }}><span className="x-tan">{p.name}</span><span className="x-tam">{p.kind}{p.ref ? " · " + p.ref : ""}{p.sub ? " · " + p.sub : ""}</span></button>)}</div>}
+    </div>
+  );
+}
+
 function downloadCsv(filename, columns, rows) {
   const esc = (x) => `"${String(x ?? "").replace(/\r?\n/g, " / ").replace(/"/g, '""')}"`;
   const head = columns.map((c) => esc(c.label)).join(",");
@@ -115,9 +140,10 @@ function Gate({ onOk }) {
 }
 
 /* ============================ FORM MODAL ============================ */
-function FormModal({ title, fields, initial, onClose, onSave }) {
+function FormModal({ title, fields, initial, onClose, onSave, people }) {
   const [d, setD] = useState(initial || {});
   const set = (k, v) => setD((x) => ({ ...x, [k]: v }));
+  const pickPerson = (f, p) => setD((x) => ({ ...x, [f.key]: p.name || "", ...(f.refKey ? { [f.refKey]: p.ref || "" } : {}), ...(f.idKey ? { [f.idKey]: p.id || null } : {}) }));
   return (
     <>
       <div className="x-scrim" onClick={onClose} />
@@ -129,7 +155,8 @@ function FormModal({ title, fields, initial, onClose, onSave }) {
           ) : (
             <div key={f.key} className={"x-formfield" + (f.full ? " full" : "")}>
               <span className="x-formlabel">{f.label}</span>
-              {f.type === "textarea" ? <textarea className="x-input" rows={2} value={d[f.key] || ""} onChange={(e) => set(f.key, e.target.value)} />
+              {f.type === "person" ? <PersonField value={d[f.key]} people={people} onPick={(p) => pickPerson(f, p)} />
+                : f.type === "textarea" ? <textarea className="x-input" rows={2} value={d[f.key] || ""} onChange={(e) => set(f.key, e.target.value)} />
                 : f.type === "select" ? <select className="x-input" value={d[f.key] ?? f.opts[0]} onChange={(e) => set(f.key, e.target.value)}>{f.opts.map((o) => <option key={o}>{o}</option>)}</select>
                 : <input className="x-input" type={f.type || "text"} value={d[f.key] || ""} onChange={(e) => set(f.key, e.target.value)} />}
             </div>
@@ -163,10 +190,11 @@ export default function Page() {
   const [attendance, setAttendance] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [covers, setCovers] = useState([]);
+  const [invoices, setInvoices] = useState([]);
 
   useEffect(() => { try { if (localStorage.getItem("rt_auth") === "1") setAuthed(true); } catch {} setReady(true); }, []);
 
-  const setters = { candidates: setTeachers, lsas: setLsas, vacancies: setVacancies, pipeline: setPipeline, schools: setSchools, tasks: setTasks, bookings: setBookings, attendance: setAttendance, submissions: setSubmissions, covers: setCovers };
+  const setters = { candidates: setTeachers, lsas: setLsas, vacancies: setVacancies, pipeline: setPipeline, schools: setSchools, tasks: setTasks, bookings: setBookings, attendance: setAttendance, submissions: setSubmissions, covers: setCovers, invoices: setInvoices };
   const reloadTable = async (t) => { if (!supabase) return; const { data } = await supabase.from(t).select("*").order("created_at", { ascending: false }); setters[t](data || []); };
   const loadAll = async () => { if (!supabase) return; await Promise.all(Object.keys(setters).map(reloadTable)); };
   useEffect(() => { if (authed) loadAll(); }, [authed]);
@@ -200,6 +228,21 @@ export default function Page() {
     await supabase.from("pipeline").update(patch).eq("id", row.id);
     if (patch.stage && row.from_vacancy && row.vacancy_id && row.candidate_id) await supabase.from("submissions").update({ stage: patch.stage }).eq("vacancy_id", row.vacancy_id).eq("candidate_id", row.candidate_id);
     reloadTable("pipeline"); reloadTable("submissions");
+  };
+
+  const teacherPeople = teachers.map((t) => ({ id: t.id, name: t.name, ref: t.ref, sub: t.spec, kind: "Teacher" }));
+  const lsaPeople = lsas.map((l) => ({ id: l.id, name: l.name, ref: "", sub: l.cert, kind: "LSA" }));
+  const allPeople = [...teacherPeople, ...lsaPeople];
+
+  const createInvoice = async (inv) => {
+    if (!supabase) return;
+    const { error } = await supabase.from("invoices").insert({ kind: inv.kind || "Teacher", client: inv.client || "", candidate_name: inv.candidate_name || "", candidate_id: inv.candidate_id || null, description: inv.description || "", amount: Number(inv.amount) || 0, paid: false, status: "Unpaid" });
+    if (error) { alert("Add failed: " + error.message); return; }
+    if (inv.candidate_id) {
+      if ((inv.kind || "Teacher") === "LSA") await supabase.from("lsas").update({ status: "Placed" }).eq("id", inv.candidate_id);
+      else { await supabase.from("candidates").update({ status: "Placed" }).eq("id", inv.candidate_id); await supabase.from("pipeline").update({ stage: "Placed" }).eq("candidate_id", inv.candidate_id); }
+    }
+    reloadTable("invoices"); reloadTable("candidates"); reloadTable("lsas"); reloadTable("pipeline");
   };
 
   const openLeaf = (id) => { setSelT(null); setSelL(null); setBellOpen(false); setView(id); };
@@ -289,19 +332,19 @@ export default function Page() {
           {view === "extract" && <Extract teachersCount={teachers.length} existing={[...teachers.map((t) => t.name), ...lsas.map((l) => l.name)]} onSaved={loadAll} />}
           {view === "lsa-add" && <Extract lsaMode teachersCount={teachers.length} existing={[...teachers.map((t) => t.name), ...lsas.map((l) => l.name)]} onSaved={loadAll} />}
 
-          {view === "t-database" && !selT && <TeacherDB teachers={teachers} onSelect={setSelT} onAdd={(r) => insertRow("candidates", r)} />}
-          {view === "t-database" && selT && <TeacherProfile t={teachers.find((x) => x.id === selT)} onBack={() => setSelT(null)} onSave={(p) => updateRow("candidates", selT, p)} />}
-          {view === "finance" && <Finance vacancies={vacancies} covers={covers} onUpdate={(id, p) => updateRow("vacancies", id, p)} />}
+          {view === "t-database" && !selT && <TeacherDB teachers={teachers} onSelect={setSelT} onAdd={(r) => insertRow("candidates", r)} onDel={(id) => deleteRow("candidates", id)} />}
+          {view === "t-database" && selT && <TeacherProfile t={teachers.find((x) => x.id === selT)} onBack={() => setSelT(null)} onSave={(p) => updateRow("candidates", selT, p)} onDelete={() => { if (confirm("Delete this candidate permanently?")) { deleteRow("candidates", selT); setSelT(null); } }} />}
+          {view === "finance" && <Finance invoices={invoices} people={allPeople} onCreate={createInvoice} onUpdate={(id, p) => updateRow("invoices", id, p)} onDel={(id) => deleteRow("invoices", id)} />}
 
           {view === "t-vacancies" && !selV && <Vacancies rows={vacancies} onOpen={setSelV} onAdd={(r) => insertRow("vacancies", r)} onUpdate={(id, p) => updateRow("vacancies", id, p)} onDel={(id) => deleteRow("vacancies", id)} onImport={(rows) => importRows("vacancies", rows)} />}
           {view === "t-vacancies" && selV && <VacancyDetail vacancy={vacancies.find((v) => v.id === selV)} candidates={teachers} subs={submissions.filter((s) => s.vacancy_id === selV)} onBack={() => setSelV(null)} onAddSub={addSubmission} onUpdateSub={updateSubmission} onDelSub={delSubmission} />}
-          {view === "t-covers" && <Covers rows={covers} teachers={teachers} onAdd={(r) => insertRow("covers", r)} onUpdate={(id, p) => updateRow("covers", id, p)} onDel={(id) => deleteRow("covers", id)} />}
-          {view === "t-pipeline" && <PipelineView rows={pipeline} vacancies={vacancies} onAdd={(r) => insertRow("pipeline", r)} onUpdate={updatePipelineRow} onDel={(id) => deleteRow("pipeline", id)} onImport={(rows) => importRows("pipeline", rows)} />}
+          {view === "t-covers" && <Covers rows={covers} people={teacherPeople} onAdd={(r) => insertRow("covers", r)} onUpdate={(id, p) => updateRow("covers", id, p)} onDel={(id) => deleteRow("covers", id)} />}
+          {view === "t-pipeline" && <PipelineView rows={pipeline} vacancies={vacancies} people={allPeople} onAdd={(r) => insertRow("pipeline", r)} onUpdate={updatePipelineRow} onDel={(id) => deleteRow("pipeline", id)} onImport={(rows) => importRows("pipeline", rows)} />}
 
           {view === "lsa-dashboard" && <LsaDashboard lsas={lsas} go={openLeaf} />}
-          {view === "lsa-directory" && !selL && <LsaDirectory lsas={lsas} onSelect={setSelL} onAdd={(r) => insertRow("lsas", r)} />}
-          {view === "lsa-directory" && selL && <LsaProfile lsa={lsas.find((x) => x.id === selL)} onBack={() => setSelL(null)} onSave={(p) => updateRow("lsas", selL, p)} />}
-          {view === "lsa-bookings" && <Bookings rows={bookings} lsas={lsas} onAdd={(r) => insertRow("bookings", r)} onDel={(id) => deleteRow("bookings", id)} />}
+          {view === "lsa-directory" && !selL && <LsaDirectory lsas={lsas} onSelect={setSelL} onAdd={(r) => insertRow("lsas", r)} onDel={(id) => deleteRow("lsas", id)} />}
+          {view === "lsa-directory" && selL && <LsaProfile lsa={lsas.find((x) => x.id === selL)} onBack={() => setSelL(null)} onSave={(p) => updateRow("lsas", selL, p)} onDelete={() => { if (confirm("Delete this LSA permanently?")) { deleteRow("lsas", selL); setSelL(null); } }} />}
+          {view === "lsa-bookings" && <Bookings rows={bookings} lsas={lsas} people={lsaPeople} onAdd={(r) => insertRow("bookings", r)} onDel={(id) => deleteRow("bookings", id)} />}
           {view === "lsa-attendance" && <Attendance rows={attendance} lsas={lsas} onAdd={(r) => insertRow("attendance", r)} onDel={(id) => deleteRow("attendance", id)} />}
 
           {view === "tasks-todo" && <Tasks rows={tasks} onAdd={(r) => insertRow("tasks", r)} onToggle={(t) => updateRow("tasks", t.id, { done: !t.done })} onUpdate={(id, p) => updateRow("tasks", id, p)} onDel={(id) => deleteRow("tasks", id)} />}
@@ -505,7 +548,7 @@ const TEACHER_CSV = [
   { label: "Degree verified", get: (r) => (r.degree_verified ? "Yes" : "No") }, { label: "Visa clear", get: (r) => (r.visa_clear ? "Yes" : "No") }, { label: "QTS/PGCE", get: (r) => (r.qts_pgce ? "Yes" : "No") }, { label: "References", get: (r) => (r.refs_checked ? "Yes" : "No") },
   { label: "Experience (verbatim)", key: "verbatim_experience" }, { label: "Qualifications (verbatim)", key: "verbatim_qualifications" }, { label: "Notes", key: "notes" },
 ];
-function TeacherDB({ teachers, onSelect, onAdd }) {
+function TeacherDB({ teachers, onSelect, onAdd, onDel }) {
   const [modal, setModal] = useState(false);
   const [q, setQ] = useState("");
   const [fStatus, setFStatus] = useState("All");
@@ -535,7 +578,7 @@ function TeacherDB({ teachers, onSelect, onAdd }) {
       {list.length === 0 ? <div className="x-panel"><div className="x-empty">No teachers yet. Use Bulk Extract or New candidate.</div></div> : (
         <div className="x-tablewrap"><table className="x-table">
           <thead><tr><th>Ref</th><th>Name</th><th>Role</th><th className="r">UAE</th><th className="r">Outside</th><th>Qual</th><th>Status</th><th></th></tr></thead>
-          <tbody>{list.map((t) => <tr key={t.id} onClick={() => onSelect(t.id)}><td><span className="x-ref">{t.ref || "—"}</span></td><td className="b">{t.name}</td><td>{t.spec}</td><td className="r nums">{Number(t.uae_years || 0).toFixed(1)}y</td><td className="r nums">{Number(t.out_years || 0).toFixed(1)}y</td><td className="mut">{t.qual}</td><td><Pill s={t.status} /></td><td className="rowact"><ChevronRight size={15} color={C.faint} /></td></tr>)}</tbody>
+          <tbody>{list.map((t) => <tr key={t.id} onClick={() => onSelect(t.id)}><td><span className="x-ref">{t.ref || "—"}</span></td><td className="b">{t.name}</td><td>{t.spec}</td><td className="r nums">{Number(t.uae_years || 0).toFixed(1)}y</td><td className="r nums">{Number(t.out_years || 0).toFixed(1)}y</td><td className="mut">{t.qual}</td><td><Pill s={t.status} /></td><td className="rowact"><button className="x-ic" onClick={(e) => { e.stopPropagation(); if (confirm("Delete " + (t.name || "this candidate") + "?")) onDel(t.id); }}><Trash2 size={13} /></button><ChevronRight size={15} color={C.faint} /></td></tr>)}</tbody>
         </table></div>
       )}
       {modal && <FormModal title="New candidate" fields={CAND_FIELDS} initial={{ status: "New" }} onClose={() => setModal(false)} onSave={save} />}
@@ -543,7 +586,7 @@ function TeacherDB({ teachers, onSelect, onAdd }) {
   );
 }
 
-function TeacherProfile({ t, onBack, onSave }) {
+function TeacherProfile({ t, onBack, onSave, onDelete }) {
   const [edit, setEdit] = useState(false); const [d, setD] = useState(t);
   useEffect(() => setD(t), [t]); if (!d) return null;
   const set = (k, v) => setD((x) => ({ ...x, [k]: v }));
@@ -572,7 +615,7 @@ function TeacherProfile({ t, onBack, onSave }) {
       </div>
       {d.verbatim_experience && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Experience — exactly as written on the CV</h2></div><div className="x-verbatim">{d.verbatim_experience}</div></div>}
       {d.verbatim_qualifications && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Qualifications — exactly as written</h2></div><div className="x-verbatim">{d.verbatim_qualifications}</div></div>}
-      <div className="x-profactions"><button className="x-ghost" onClick={() => d.cv_url ? window.open(d.cv_url, "_blank") : alert("No file stored for this candidate. Re-extract the CV through the system to enable download.")}><Download size={15} /> Download CV</button><button className="x-ghost"><Briefcase size={15} /> Match to vacancy</button><button className="x-primary"><Mail size={15} /> Send offer</button></div>
+      <div className="x-profactions"><button className="x-ghost" onClick={() => d.cv_url ? window.open(d.cv_url, "_blank") : alert("No file stored for this candidate. Re-extract the CV through the system to enable download.")}><Download size={15} /> Download CV</button><button className="x-ghost"><Briefcase size={15} /> Match to vacancy</button><button className="x-primary"><Mail size={15} /> Send offer</button><button className="x-ghost" style={{ marginLeft: "auto", color: C.red }} onClick={onDelete}><Trash2 size={15} /> Delete candidate</button></div>
     </div>
   );
 }
@@ -605,7 +648,7 @@ function LsaDashboard({ lsas, go }) {
     </div>
   );
 }
-function LsaDirectory({ lsas, onSelect, onAdd }) {
+function LsaDirectory({ lsas, onSelect, onAdd, onDel }) {
   const [modal, setModal] = useState(false);
   const [q, setQ] = useState("");
   const [fStatus, setFStatus] = useState("All");
@@ -629,13 +672,13 @@ function LsaDirectory({ lsas, onSelect, onAdd }) {
         <span className="x-filtercount">{list.length} shown</span>
       </div>
       {list.length === 0 ? <div className="x-panel"><div className="x-empty">No LSAs yet. Add one, or use Add LSAs to extract from CVs.</div></div> : (
-        <div className="x-cards">{list.map((l) => <button key={l.id} className="x-lcard" onClick={() => onSelect(l.id)}><div className="x-lctop"><span className="x-lname">{l.name}</span><Pill s={l.status} /></div><div className="x-lrow"><Heart size={13} color={C.red} /> {l.cert || "—"}</div><div className="x-lrow"><Users size={13} color={C.muted} /> {l.langs || "—"}</div><div className="x-lrow"><MapPin size={13} color={C.muted} /> {l.location || "—"}</div><div className="x-lcfoot"><span className="x-lfee nums">AED {fmt(calcRate(l.calc))}<span className="x-lper">/mo</span></span><ChevronRight size={15} color={C.faint} /></div></button>)}</div>
+        <div className="x-cards">{list.map((l) => <div key={l.id} className="x-lcard" onClick={() => onSelect(l.id)}><div className="x-lctop"><span className="x-lname">{l.name}</span><span style={{ display: "flex", alignItems: "center", gap: 8 }}><Pill s={l.status} /><span className="x-ic" onClick={(e) => { e.stopPropagation(); if (confirm("Delete " + (l.name || "this LSA") + "?")) onDel(l.id); }}><Trash2 size={13} /></span></span></div><div className="x-lrow"><Heart size={13} color={C.red} /> {l.cert || "—"}</div><div className="x-lrow"><Users size={13} color={C.muted} /> {l.langs || "—"}</div><div className="x-lrow"><MapPin size={13} color={C.muted} /> {l.location || "—"}</div><div className="x-lcfoot"><span className="x-lfee nums">AED {fmt(l.salary || suggestLsaSalary(l.cert, l.exp))}<span className="x-lper">/mo salary</span></span><ChevronRight size={15} color={C.faint} /></div></div>)}</div>
       )}
       {modal && <FormModal title="New LSA" fields={LSA_FIELDS} initial={{ status: "Available", placement_fee: 1000 }} onClose={() => setModal(false)} onSave={save} />}
     </div>
   );
 }
-function LsaProfile({ lsa, onBack, onSave }) {
+function LsaProfile({ lsa, onBack, onSave, onDelete }) {
   const [edit, setEdit] = useState(false); const [d, setD] = useState(lsa);
   const [noteText, setNoteText] = useState(""); const [pay, setPay] = useState({ amount: "", method: "Bank transfer" });
   useEffect(() => setD(lsa), [lsa]); if (!d) return null;
@@ -651,7 +694,7 @@ function LsaProfile({ lsa, onBack, onSave }) {
   return (
     <div className="x-page">
       <button className="x-back" onClick={onBack}><ArrowLeft size={15} /> Back to directory</button>
-      <div className="x-profhead"><div><h1 className="x-h1">{d.name}</h1><div className="x-sub">{d.cert} · {d.location}</div></div><div style={{ display: "flex", gap: 8 }}>{d.cv_url && <button className="x-ghost" onClick={() => window.open(d.cv_url, "_blank")}><Download size={14} /> CV</button>}{edit ? <button className="x-primary" onClick={saveProfile}><Check size={15} /> Save changes</button> : <button className="x-ghost" onClick={() => setEdit(true)}><Pencil size={14} /> Edit profile</button>}</div></div>
+      <div className="x-profhead"><div><h1 className="x-h1">{d.name}</h1><div className="x-sub">{d.cert} · {d.location}</div></div><div style={{ display: "flex", gap: 8 }}>{d.cv_url && <button className="x-ghost" onClick={() => window.open(d.cv_url, "_blank")}><Download size={14} /> CV</button>}{edit ? <button className="x-primary" onClick={saveProfile}><Check size={15} /> Save changes</button> : <button className="x-ghost" onClick={() => setEdit(true)}><Pencil size={14} /> Edit profile</button>}<button className="x-ghost" style={{ color: C.red }} onClick={onDelete}><Trash2 size={14} /></button></div></div>
       <div className="x-2col">
         <div>
           <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Profile</h2></div>
@@ -667,6 +710,10 @@ function LsaProfile({ lsa, onBack, onSave }) {
             <div className="x-calcbig"><div><div className="x-calclabel">LSA rate</div><div className="x-calcv nums">AED {fmt(rate)}</div></div><div className="x-calcplus">+</div><div><div className="x-calclabel">Placement fee</div><input className="x-feeinput nums" type="number" value={d.placement_fee || 0} onChange={(e) => set("placement_fee", e.target.value)} /></div><div className="x-calceq">=</div><div><div className="x-calclabel">Family package</div><div className="x-calcv nums red">AED {fmt(pkg)}</div></div></div>
             <div className="x-calcgrid"><Select label="Hours/week" value={calc.hours} opts={[10, 15, 20, 25, 30, 40]} onChange={(v) => setCalc("hours", Number(v))} /><Select label="Level" value={calc.level} opts={["Junior", "Mid", "Experienced"]} onChange={(v) => setCalc("level", v)} /><Select label="Qualification" value={calc.qual} opts={["Level 3", "ABAT", "SEN diploma"]} onChange={(v) => setCalc("qual", v)} /><Select label="Languages" value={calc.langs} opts={[1, 2, 3]} onChange={(v) => setCalc("langs", Number(v))} /><Select label="Tier" value={calc.tier} opts={["Standard", "Specialist"]} onChange={(v) => setCalc("tier", v)} /><Select label="Child needs" value={calc.needs} opts={["Mild", "Moderate", "Complex"]} onChange={(v) => setCalc("needs", v)} /><Select label="Urgency" value={calc.urgency} opts={["Standard", "Urgent"]} onChange={(v) => setCalc("urgency", v)} /></div>
             <button className="x-primary" style={{ marginTop: 12 }} onClick={saveRate}><Check size={15} /> Save rate</button>
+          </div>
+          <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Monthly salary</h2><span className="x-pmeta">Suggested from certificate & experience</span></div>
+            <div className="x-calcbig"><div><div className="x-calclabel">Suggested</div><div className="x-calcv nums">AED {fmt(suggestLsaSalary(d.cert, d.exp))}</div></div><div className="x-calceq">→</div><div><div className="x-calclabel">Agreed salary</div><input className="x-feeinput nums" type="number" value={d.salary ?? suggestLsaSalary(d.cert, d.exp)} onChange={(e) => set("salary", e.target.value)} /></div></div>
+            <button className="x-primary" style={{ marginTop: 12 }} onClick={() => onSave({ salary: Number(d.salary ?? suggestLsaSalary(d.cert, d.exp)) })}><Check size={15} /> Save salary</button>
           </div>
           <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2"><CreditCard size={15} style={{ verticalAlign: -2 }} /> Payments</h2></div>
             <div className="x-payadd"><input className="x-input" type="number" placeholder="Amount" value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} /><select className="x-input" value={pay.method} onChange={(e) => setPay({ ...pay, method: e.target.value })}><option>Bank transfer</option><option>Cash</option><option>Card</option></select><button className="x-primary sm" onClick={addPay}><Plus size={14} /></button></div>
@@ -684,17 +731,17 @@ const BOOKING_FIELDS = [
   { key: "rate", label: "Rate / month", type: "number" }, { key: "fee", label: "Placement fee", type: "number" },
   { key: "status", label: "Status", type: "select", opts: ["Active", "Ended"] },
 ];
-function Bookings({ rows, lsas, onAdd, onDel }) {
+function Bookings({ rows, lsas, people, onAdd, onDel }) {
   const [modal, setModal] = useState(false); const [openC, setOpenC] = useState(null);
   const lsaNames = (lsas || []).map((l) => l.name).filter(Boolean);
-  const fields = [lsaNames.length ? { key: "lsa_name", label: "LSA", type: "select", opts: lsaNames } : { key: "lsa_name", label: "LSA name" }, { key: "family", label: "Family" }, { key: "location", label: "Location" }, { key: "rate", label: "Rate / month", type: "number" }, { key: "fee", label: "Placement fee", type: "number" }, { key: "status", label: "Status", type: "select", opts: ["Active", "Ended"] }];
+  const fields = [{ key: "lsa_name", label: "LSA", type: "person" }, { key: "family", label: "Family" }, { key: "location", label: "Location" }, { key: "rate", label: "Rate / month", type: "number" }, { key: "fee", label: "Placement fee", type: "number" }, { key: "status", label: "Status", type: "select", opts: ["Active", "Ended"] }];
   return (
     <div className="x-page">
       <div className="x-headrow"><div><h1 className="x-h1">Bookings</h1><p className="x-sub">Active family placements. Click a card for details.</p></div><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New booking</button></div>
       {rows.length === 0 ? <div className="x-panel"><div className="x-empty">No bookings yet. Press New booking.</div></div> : (
         <div className="x-cards">{rows.map((b) => <button key={b.id} className="x-lcard" onClick={() => setOpenC(b)}><div className="x-lctop"><span className="x-lname">{b.lsa_name}</span><Pill s={b.status} /></div><div className="x-lrow"><Users size={13} color={C.muted} /> {b.family || "—"}</div><div className="x-lrow"><MapPin size={13} color={C.muted} /> {b.location || "—"}</div><div className="x-lcfoot"><span className="x-lfee nums">AED {fmt(Number(b.rate || 0) + Number(b.fee || 0))}<span className="x-lper">/mo</span></span><ChevronRight size={15} color={C.faint} /></div></button>)}</div>
       )}
-      {modal && <FormModal title="New booking" fields={fields} initial={{ status: "Active", lsa_name: lsaNames[0] || "" }} onClose={() => setModal(false)} onSave={(d) => { onAdd(d); setModal(false); }} />}
+      {modal && <FormModal title="New booking" fields={fields} people={people} initial={{ status: "Active" }} onClose={() => setModal(false)} onSave={(d) => { onAdd(d); setModal(false); }} />}
       {openC && <><div className="x-scrim" onClick={() => setOpenC(null)} /><div className="x-modal"><div className="x-modalhead"><h2 className="x-h2">{openC.lsa_name}</h2><button className="x-ic" onClick={() => setOpenC(null)}><X size={16} /></button></div><Row k="Family" v={openC.family || "—"} /><Row k="Location" v={openC.location || "—"} /><Row k="Rate/mo" v={"AED " + fmt(openC.rate || 0)} /><Row k="Placement fee" v={"AED " + fmt(openC.fee || 0)} /><Row k="Total" v={"AED " + fmt(Number(openC.rate || 0) + Number(openC.fee || 0))} /><div style={{ marginTop: 14, textAlign: "right" }}><button className="x-ghost" onClick={() => { onDel(openC.id); setOpenC(null); }}><Trash2 size={14} /> Delete</button></div></div></>}
     </div>
   );
@@ -771,7 +818,7 @@ function Vacancies({ rows, onOpen, onAdd, onUpdate, onDel, onImport }) {
 /* ============================ PIPELINE ============================ */
 const PIPE_STAGES = ["Sourcing", "Submitted", "Interview", "Offer", "Placed", "Rejected"];
 const PIPE_FIELDS = [
-  { key: "school", label: "School" }, { key: "grp", label: "Group" }, { key: "role", label: "Role" }, { key: "candidate_name", label: "Candidate" },
+  { key: "school", label: "School" }, { key: "grp", label: "Group" }, { key: "role", label: "Role" }, { key: "candidate_name", label: "Candidate", type: "person", refKey: "candidate_ref", idKey: "candidate_id" },
   { key: "type", label: "Type", type: "select", opts: ["Permanent", "Supply"] }, { key: "stage", label: "Stage", type: "select", opts: PIPE_STAGES },
   { key: "interview_date", label: "Interview date", type: "date" }, { key: "start_date", label: "Start date", type: "date" },
   { key: "interview_rating", label: "Interview rating" }, { key: "outcome", label: "Outcome (if closed)" },
@@ -818,7 +865,7 @@ function VacancyDetail({ vacancy, candidates, subs, onBack, onAddSub, onUpdateSu
   );
 }
 
-function PipelineView({ rows, vacancies, onAdd, onUpdate, onDel, onImport }) {
+function PipelineView({ rows, vacancies, people, onAdd, onUpdate, onDel, onImport }) {
   const [modal, setModal] = useState(false); const [filter, setFilter] = useState("All");
   const shown = rows.filter((r) => filter === "All" || (r.stage || "Sourcing") === filter);
   const vIds = new Set((vacancies || []).map((v) => v.id));
@@ -846,7 +893,7 @@ function PipelineView({ rows, vacancies, onAdd, onUpdate, onDel, onImport }) {
           </tr>); })}</tbody>
         </table></div>
       )}
-      {modal && <FormModal title="New deal" fields={PIPE_FIELDS} initial={{ type: "Permanent", stage: "Sourcing", follow_ups: 0 }} onClose={() => setModal(false)} onSave={(d) => { onAdd(d); setModal(false); }} />}
+      {modal && <FormModal title="New deal" fields={PIPE_FIELDS} people={people} initial={{ type: "Permanent", stage: "Sourcing", follow_ups: 0 }} onClose={() => setModal(false)} onSave={(d) => { onAdd(d); setModal(false); }} />}
     </div>
   );
 }
@@ -905,12 +952,11 @@ const COVER_BASE = [
   { key: "day_rate", label: "Weekday rate (AED)", type: "number" }, { key: "friday_rate", label: "Friday rate (AED)", type: "number" },
   { key: "status", label: "Status", type: "select", opts: ["Active", "Ended"] },
 ];
-function Covers({ rows, teachers, onAdd, onUpdate, onDel }) {
+function Covers({ rows, people, onAdd, onUpdate, onDel }) {
   const [modal, setModal] = useState(false);
   const [openC, setOpenC] = useState(null);
   const [day, setDay] = useState({ date: "", type: "Weekday" });
-  const tNames = (teachers || []).map((t) => t.name).filter(Boolean);
-  const fields = [tNames.length ? { key: "teacher_name", label: "Teacher", type: "select", opts: tNames } : { key: "teacher_name", label: "Teacher name" }, ...COVER_BASE];
+  const fields = [{ key: "teacher_name", label: "Teacher", type: "person" }, ...COVER_BASE];
   const payOf = (c) => (Array.isArray(c.days) ? c.days : []).reduce((p, d) => p + (d.type === "Friday" ? Number(c.friday_rate || 0) : Number(c.day_rate || 0)), 0);
   const cover = openC ? rows.find((r) => r.id === openC.id) : null;
   const days = cover && Array.isArray(cover.days) ? cover.days : [];
@@ -931,7 +977,7 @@ function Covers({ rows, teachers, onAdd, onUpdate, onDel }) {
           </tr>)}</tbody>
         </table></div>
       )}
-      {modal && <FormModal title="New cover" fields={fields} initial={{ status: "Active", teacher_name: tNames[0] || "" }} onClose={() => setModal(false)} onSave={(d) => { onAdd({ ...d, days: [] }); setModal(false); }} />}
+      {modal && <FormModal title="New cover" fields={fields} people={people} initial={{ status: "Active" }} onClose={() => setModal(false)} onSave={(d) => { onAdd({ ...d, days: [] }); setModal(false); }} />}
       {cover && <><div className="x-scrim" onClick={() => setOpenC(null)} /><div className="x-modal lg">
         <div className="x-modalhead"><h2 className="x-h2">{cover.teacher_name} · {cover.school}</h2><button className="x-ic" onClick={() => setOpenC(null)}><X size={16} /></button></div>
         <div className="x-calcbig"><div><div className="x-calclabel">Days worked</div><div className="x-calcv nums">{days.length}</div></div><div className="x-calceq">=</div><div><div className="x-calclabel">Total pay</div><div className="x-calcv nums red">AED {fmt(payOf(cover))}</div></div></div>
@@ -944,10 +990,13 @@ function Covers({ rows, teachers, onAdd, onUpdate, onDel }) {
 }
 
 /* ============================ FINANCE ============================ */
-function openInvoice(v) {
-  const fee = Number(v.fee || 0);
+function openInvoice(inv) {
+  const fee = Number(inv.amount ?? inv.fee ?? 0);
   const vat = Math.round(fee * 0.05 * 100) / 100;
   const total = fee + vat;
+  const client = inv.client || inv.school || "Client";
+  const desc = inv.description || inv.role || "Placement";
+  const contact = inv.candidate_name || inv.contact || "";
   const num = "INV-" + String(Date.now()).slice(-6);
   const date = new Date().toLocaleDateString("en-GB");
   const money = (n) => "AED " + new Intl.NumberFormat("en-AE", { minimumFractionDigits: 2 }).format(n);
@@ -957,6 +1006,7 @@ function openInvoice(v) {
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${num}</title><style>
     *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
     body{margin:0;padding:44px;color:#1C2230}
+    .bar{display:flex;gap:10px;margin:0 0 22px}
     .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #DA2A34;padding-bottom:20px}
     .brand{font-size:30px;font-weight:800}.brand span{color:#DA2A34}
     .brand small{display:block;font-size:11px;font-weight:600;color:#7A8494;letter-spacing:2px;margin-top:3px}
@@ -973,51 +1023,59 @@ function openInvoice(v) {
     .totals div{display:flex;justify-content:space-between;padding:8px 0}
     .totals .grand{border-top:2px solid #1C2230;font-weight:800;font-size:17px;color:#DA2A34;margin-top:4px;padding-top:10px}
     .foot{margin-top:44px;font-size:12px;color:#555;border-top:1px solid #eee;padding-top:18px;line-height:1.8}
-    .btn{margin:26px 0;padding:12px 22px;background:#DA2A34;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}
-    @media print{.btn{display:none}}
+    .btn{padding:11px 20px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}
+    .btn.red{background:#DA2A34;color:#fff}.btn.grey{background:#EEF0F4;color:#1C2230}
+    @media print{.bar{display:none}}
   </style></head><body>
+    <div class="bar"><button class="btn red" onclick="window.print()">Download / Print PDF</button><button class="btn grey" onclick="window.close()">&larr; Close</button></div>
     <div class="top"><div class="brand"><span>r</span>Triibe<small>FZCO &middot; EDUCATION RECRUITMENT</small></div>
     <div><h1>INVOICE</h1><div class="meta">Invoice no: <b>${num}</b><br>Date: ${date}<br>TRN: 100452871500003</div></div></div>
     <div class="parties"><div><div class="lbl">From</div><b>rTriibe FZCO</b><br>Dubai, United Arab Emirates<br>TRN 100452871500003</div>
-    <div style="text-align:right"><div class="lbl">Bill to</div><b>${esc(v.school) || "School"}</b><br>${esc(v.contact)}</div></div>
+    <div style="text-align:right"><div class="lbl">Bill to</div><b>${esc(client)}</b><br>${esc(contact)}</div></div>
     <table><thead><tr><th>Description</th><th class="r">Amount</th></tr></thead>
-    <tbody><tr><td>Recruitment placement fee &mdash; ${esc(v.role) || "Placement"}</td><td class="r">${money(fee)}</td></tr></tbody></table>
+    <tbody><tr><td>${esc(desc)}</td><td class="r">${money(fee)}</td></tr></tbody></table>
     <div class="totals"><div><span>Subtotal</span><span>${money(fee)}</span></div><div><span>VAT (5%)</span><span>${money(vat)}</span></div><div class="grand"><span>Total due</span><span>${money(total)}</span></div></div>
     <div class="foot">Payment terms: 30 days from invoice date. Please quote the invoice number as your payment reference.<br>Bank details: [add your rTriibe FZCO bank account here].<br>Thank you for working with rTriibe.</div>
-    <button class="btn" onclick="window.print()">Download / Print PDF</button>
   </body></html>`);
   w.document.close();
 }
-function Finance({ vacancies, covers, onUpdate }) {
-  const rows = vacancies || [];
-  const feeOf = (v) => Number(v.fee || 0);
-  const vatOf = (v) => Math.round(feeOf(v) * 0.05 * 100) / 100;
-  const totOf = (v) => feeOf(v) + vatOf(v);
-  const totalFees = rows.reduce((s, v) => s + feeOf(v), 0);
-  const totalVat = rows.reduce((s, v) => s + vatOf(v), 0);
-  const outstanding = rows.filter((v) => !v.paid).reduce((s, v) => s + totOf(v), 0);
+const INV_FIELDS = [
+  { key: "kind", label: "Type", type: "select", opts: ["Teacher", "LSA"] },
+  { key: "candidate_name", label: "Candidate", type: "person", idKey: "candidate_id" },
+  { key: "client", label: "Bill to (school / family)" },
+  { key: "description", label: "Description" },
+  { key: "amount", label: "Amount (AED)", type: "number" },
+];
+function Finance({ invoices, people, onCreate, onUpdate, onDel }) {
+  const [modal, setModal] = useState(false);
+  const rows = invoices || [];
+  const amt = (i) => Number(i.amount || 0);
+  const vatOf = (i) => Math.round(amt(i) * 0.05 * 100) / 100;
+  const totOf = (i) => amt(i) + vatOf(i);
+  const totalFees = rows.reduce((s, i) => s + amt(i), 0);
+  const totalVat = rows.reduce((s, i) => s + vatOf(i), 0);
+  const outstanding = rows.filter((i) => !i.paid).reduce((s, i) => s + totOf(i), 0);
   return (
     <div className="x-page">
-      <h1 className="x-h1">Finance</h1><p className="x-sub">Fees, 5% VAT and invoices per vacancy. Set a fee on a row, mark it paid, and download a professional invoice for the school.</p>
+      <div className="x-headrow"><div><h1 className="x-h1">Finance</h1><p className="x-sub">Invoices for teacher and LSA placements. Creating one marks the candidate Placed and syncs the pipeline.</p></div><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New invoice</button></div>
       <div className="x-stats">
         <div className="x-stat"><span className="x-statbar" style={{ background: C.blue }} /><div className="x-statv nums">AED {fmt(Math.round(totalFees))}</div><div className="x-statl">Total fees</div></div>
         <div className="x-stat"><span className="x-statbar" style={{ background: C.amber }} /><div className="x-statv nums">AED {fmt(Math.round(totalVat))}</div><div className="x-statl">VAT (5%)</div></div>
         <div className="x-stat"><span className="x-statbar" style={{ background: C.green }} /><div className="x-statv nums">AED {fmt(Math.round(totalFees + totalVat))}</div><div className="x-statl">Grand total</div></div>
         <div className="x-stat"><span className="x-statbar" style={{ background: C.red }} /><div className="x-statv nums">AED {fmt(Math.round(outstanding))}</div><div className="x-statl">Outstanding</div></div>
       </div>
-      <div className="x-tablewrap"><table className="x-table"><thead><tr><th>Vacancy</th><th>School</th><th className="r">Fee (AED)</th><th className="r">VAT 5%</th><th className="r">Total</th><th>Paid</th><th></th></tr></thead>
-        <tbody>
-          {rows.length === 0 && <tr><td colSpan={7} className="x-empty">No vacancies yet.</td></tr>}
-          {rows.map((v) => { const pc = v.paid ? C.green : C.red; return (<tr key={v.id}>
-            <td className="b">{v.role || "—"}</td><td>{v.school || "—"}</td>
-            <td className="r"><input className="x-cellinput nums" style={{ textAlign: "right", width: 92 }} defaultValue={v.fee || 0} onBlur={(e) => onUpdate(v.id, { fee: Number(e.target.value) || 0 })} /></td>
-            <td className="r nums">{fmt(vatOf(v))}</td>
-            <td className="r nums b">{fmt(totOf(v))}</td>
-            <td><button className="x-pill" style={{ cursor: "pointer", color: pc, background: pc + "16", borderColor: pc + "30" }} onClick={() => onUpdate(v.id, { paid: !v.paid })}>{v.paid ? "Paid" : "Unpaid"}</button></td>
-            <td className="rowact"><button className="x-ghost" style={{ padding: "5px 9px" }} onClick={() => openInvoice(v)}><Download size={13} /> Invoice</button></td>
-          </tr>); })}
-        </tbody>
-      </table></div>
+      {rows.length === 0 ? <div className="x-panel"><div className="x-empty">No invoices yet. Press New invoice.</div></div> : (
+        <div className="x-tablewrap"><table className="x-table"><thead><tr><th>Bill to</th><th>Candidate</th><th>Description</th><th className="r">Amount</th><th className="r">VAT 5%</th><th className="r">Total</th><th>Paid</th><th></th></tr></thead>
+          <tbody>{rows.map((i) => { const pc = i.paid ? C.green : C.red; return (<tr key={i.id}>
+            <td className="b">{i.client || "—"}<span className="x-kindtag">{i.kind || "Teacher"}</span></td>
+            <td>{i.candidate_name || "—"}</td><td className="mut">{i.description || "—"}</td>
+            <td className="r nums">{fmt(amt(i))}</td><td className="r nums">{fmt(vatOf(i))}</td><td className="r nums b">{fmt(totOf(i))}</td>
+            <td><button className="x-pill" style={{ cursor: "pointer", color: pc, background: pc + "16", borderColor: pc + "30" }} onClick={() => onUpdate(i.id, { paid: !i.paid, status: !i.paid ? "Paid" : "Unpaid" })}>{i.paid ? "Paid" : "Unpaid"}</button></td>
+            <td className="rowact"><button className="x-ghost" style={{ padding: "5px 9px" }} onClick={() => openInvoice(i)}><Download size={13} /></button><button className="x-ic" onClick={() => { if (confirm("Delete this invoice?")) onDel(i.id); }}><Trash2 size={13} /></button></td>
+          </tr>); })}</tbody>
+        </table></div>
+      )}
+      {modal && <FormModal title="New invoice" fields={INV_FIELDS} people={people} initial={{ kind: "Teacher" }} onClose={() => setModal(false)} onSave={(d) => { onCreate(d); setModal(false); }} />}
     </div>
   );
 }

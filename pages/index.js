@@ -611,6 +611,21 @@ function TeacherProfile({ t, docs, onBack, onSave, onDelete, onRefreshDocs }) {
   const delExp = (i) => setCv((x) => ({ ...x, experience: x.experience.filter((e, j) => j !== i) }));
   const saveCv = () => onSave({ cv_data: cv });
   const genCv = () => generateRtriibeCv({ ...d, cv_data: cv });
+  const [cvBusy, setCvBusy] = useState(false);
+  const uploadOriginal = async (file) => {
+    if (!file || !hasSupabase) return;
+    setCvBusy(true);
+    try {
+      const path = d.id + "/" + Date.now() + "-" + file.name;
+      const { error: upErr } = await supabase.storage.from("cvs").upload(path, file, { upsert: true });
+      if (upErr) throw upErr;
+      const { data: pub } = supabase.storage.from("cvs").getPublicUrl(path);
+      onSave({ cv_url: pub.publicUrl });
+      setD((x) => ({ ...x, cv_url: pub.publicUrl }));
+      alert("Original file stored. Download CV will now work.");
+    } catch (e) { alert("Upload failed: " + (e.message || e) + "\n\nMake sure a public bucket named 'cvs' exists in Supabase Storage."); }
+    setCvBusy(false);
+  };
   return (
     <div className="x-page">
       <button className="x-back" onClick={onBack}><ArrowLeft size={15} /> Back to database</button>
@@ -659,7 +674,7 @@ function TeacherProfile({ t, docs, onBack, onSave, onDelete, onRefreshDocs }) {
           <div key={type} className="x-docrow"><div className="x-docname">{items.length ? <CheckCircle2 size={15} color={C.green} /> : <ShieldAlert size={15} color={C.faint} />} {type}{items.length > 1 ? " (" + items.length + ")" : ""}</div>{items.length ? <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>{items.map((r) => <button key={r.id} className="x-ghost sm" onClick={() => window.open(r.file_url, "_blank")}><Download size={13} /> {r.file_name}</button>)}</div> : <span className="x-docmiss">Missing</span>}</div>
         ); })}</div>
       </div>
-      <div className="x-profactions"><button className="x-ghost" onClick={() => d.cv_url ? window.open(d.cv_url, "_blank") : alert("No file stored for this candidate. Re-extract the CV through the system to enable download.")}><Download size={15} /> Download CV</button><button className="x-ghost"><Briefcase size={15} /> Match to vacancy</button><button className="x-primary"><Mail size={15} /> Send offer</button><button className="x-ghost" style={{ marginLeft: "auto", color: C.red }} onClick={onDelete}><Trash2 size={15} /> Delete candidate</button></div>
+      <div className="x-profactions"><button className="x-ghost" onClick={() => d.cv_url ? window.open(d.cv_url, "_blank") : alert("No file stored for this candidate yet. Use 'Upload original file' to store one.")}><Download size={15} /> Download CV</button><label className="x-ghost" style={{ cursor: "pointer" }}><UploadCloud size={15} /> {cvBusy ? "Uploading…" : "Upload original file"}<input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: "none" }} disabled={cvBusy} onChange={(e) => { const f = e.target.files[0]; if (f) uploadOriginal(f); e.target.value = ""; }} /></label><button className="x-ghost"><Briefcase size={15} /> Match to vacancy</button><button className="x-ghost" style={{ marginLeft: "auto", color: C.red }} onClick={onDelete}><Trash2 size={15} /> Delete candidate</button></div>
     </div>
   );
 }

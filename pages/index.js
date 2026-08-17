@@ -1241,10 +1241,11 @@ async function extractFileText(file) {
 }
 const digits = (s) => String(s || "").replace(/\D/g, "");
 function AttachFiles({ candidates, people, onDone }) {
-  const [pending, setPending] = useState([]); // files needing manual assign: {file, name}
-  const [done, setDone] = useState([]); // {name, candidate, how}
+  const [pending, setPending] = useState([]);
+  const [done, setDone] = useState([]);
+  const [dupes, setDupes] = useState([]);
+  const [progress, setProgress] = useState({ i: 0, total: 0 });
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
 
   const norm = (s) => String(s || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 
@@ -1288,16 +1289,26 @@ function AttachFiles({ candidates, people, onDone }) {
 
   const onDrop = async (files) => {
     if (!files.length || !hasSupabase) return;
-    setBusy(true); setMsg("Matching " + files.length + " files…"); const stillPending = []; const justDone = [];
-    for (const file of Array.from(files)) {
-      let match = matchByName(file.name); let how = "filename";
-      if (!match) { const byContent = await matchByContent(file); if (byContent) { match = byContent.c; how = byContent.how; } }
-      if (match) { try { await store(match, file); justDone.push({ name: file.name, candidate: match.name, how }); } catch (e) { stillPending.push({ file, name: file.name }); } }
-      else stillPending.push({ file, name: file.name });
+    const arr = Array.from(files);
+    setBusy(true); setDone([]); setDupes([]); setPending([]); setProgress({ i: 0, total: arr.length });
+    const doneL = []; const dupL = []; const pendL = [];
+    const attachedIds = new Set(); const seenNames = new Set();
+    for (let i = 0; i < arr.length; i++) {
+      const file = arr[i];
+      if (seenNames.has(file.name)) { dupL.push({ name: file.name, candidate: "", reason: "same file twice in this batch" }); }
+      else {
+        seenNames.add(file.name);
+        let match = matchByName(file.name); let how = "filename";
+        if (!match) { const bc = await matchByContent(file); if (bc) { match = bc.c; how = bc.how; } }
+        if (match) {
+          if (match.cv_url || attachedIds.has(match.id)) { dupL.push({ name: file.name, candidate: match.name, reason: match.cv_url ? "candidate already has a CV" : "another file already matched this candidate" }); }
+          else { try { await store(match, file); attachedIds.add(match.id); doneL.push({ name: file.name, candidate: match.name, how }); } catch (e) { pendL.push({ file, name: file.name }); } }
+        } else pendL.push({ file, name: file.name });
+      }
+      setProgress({ i: i + 1, total: arr.length });
+      if (i % 8 === 0) { setDone([...doneL]); setDupes([...dupL]); setPending([...pendL]); await new Promise((r) => setTimeout(r, 0)); }
     }
-    setDone((d) => [...justDone, ...d]);
-    setPending((p) => [...stillPending, ...p]);
-    setMsg("Matched " + justDone.length + " of " + files.length + " automatically." + (stillPending.length ? " " + stillPending.length + " couldn't be identified — assign below." : ""));
+    setDone(doneL); setDupes(dupL); setPending(pendL);
     setBusy(false); onDone();
   };
 
@@ -1310,26 +1321,37 @@ function AttachFiles({ candidates, people, onDone }) {
     setBusy(false);
   };
 
+  const pct = progress.total ? Math.round(progress.i / progress.total * 100) : 0;
   return (
     <div className="x-page">
-      <div className="x-headrow"><div><h1 className="x-h1">Attach original CVs</h1><p className="x-sub">Drop your resume files. The app matches each to a candidate by filename, or by reading the email / phone inside the file — free, no AI. Only files it truly can't identify need a manual pick.</p></div></div>
+      <div className="x-headrow"><div><h1 className="x-h1">Attach original CVs</h1><p className="x-sub">Drop your resume files. The app matches each to a candidate by filename, or by reading the email / phone / name inside the file — free, no AI. It skips anyone who already has a CV and flags duplicates.</p></div></div>
       <label className="x-drop">
         <UploadCloud size={26} color={C.muted} />
-        <div className="x-dropt">{busy ? "Working…" : "Drop resume files here or click to choose"}</div>
-        <div className="x-dropm">PDF or Word matched automatically · images may need manual assign</div>
+        <div className="x-dropt">{busy ? "Working — keep this tab open…" : "Drop resume files here or click to choose"}</div>
+        <div className="x-dropm">Tip: for very large batches, do a few hundred at a time so your browser stays smooth</div>
         <input type="file" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: "none" }} disabled={busy} onChange={(e) => { onDrop(e.target.files); e.target.value = ""; }} />
       </label>
-      {msg && <div className="x-note">{msg}</div>}
+
+      {(busy || progress.total > 0) && <div className="x-panel">
+        <div className="x-progresstop"><span className="x-progresslbl">{busy ? "Processing " + progress.i + " of " + progress.total : "Done — " + progress.total + " files"}</span><span className="x-progresspct nums">{pct}%</span></div>
+        <div className="x-progresswrap"><div className="x-progressbar" style={{ width: pct + "%" }} /></div>
+        <div className="x-progressstats"><span><b className="nums">{done.length}</b> attached</span><span><b className="nums">{dupes.length}</b> duplicates</span><span><b className="nums">{pending.length}</b> to assign</span></div>
+      </div>}
+
+      {dupes.length > 0 && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Duplicates — skipped, nothing overwritten</h2><span className="x-pmeta">{dupes.length}</span></div>
+        <div className="x-doclist">{dupes.slice(0, 100).map((r, i) => <div key={i} className="x-docrow"><div className="x-docname"><AlertTriangle size={15} color={C.amber} /> {r.name}</div><span className="mut">{r.candidate ? r.candidate + " · " : ""}{r.reason}</span></div>)}{dupes.length > 100 && <div className="x-empty">+ {dupes.length - 100} more</div>}</div>
+      </div>}
 
       {pending.length > 0 && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Couldn't identify — assign manually</h2><span className="x-pmeta">{pending.length} left</span></div>
-        {pending.map((item, i) => <div key={i} className="x-assignrow">
+        {pending.slice(0, 80).map((item, i) => <div key={i} className="x-assignrow">
           <div className="x-assignname">{item.name}</div>
           <div className="x-assignpick"><PersonField value="" people={people} onPick={(p) => { if (p.id) assign(item, p.id); }} /></div>
         </div>)}
+        {pending.length > 80 && <div className="x-empty">+ {pending.length - 80} more — assign these first, they clear as you go</div>}
       </div>}
 
       {done.length > 0 && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Attached</h2><span className="x-pmeta">{done.length} done</span></div>
-        <div className="x-doclist">{done.map((r, i) => <div key={i} className="x-docrow"><div className="x-docname"><CheckCircle2 size={15} color={C.green} /> {r.name}</div><span className="mut">→ {r.candidate} · {r.how}</span></div>)}</div>
+        <div className="x-doclist">{done.slice(0, 100).map((r, i) => <div key={i} className="x-docrow"><div className="x-docname"><CheckCircle2 size={15} color={C.green} /> {r.name}</div><span className="mut">→ {r.candidate} · {r.how}</span></div>)}{done.length > 100 && <div className="x-empty">+ {done.length - 100} more</div>}</div>
       </div>}
     </div>
   );

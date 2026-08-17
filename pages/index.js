@@ -7,6 +7,7 @@ import {
   Receipt, AlertTriangle, Calendar,
 } from "lucide-react";
 import { supabase, hasSupabase } from "../lib/supabaseClient";
+import { DOC_TYPES } from "../lib/compliance";
 
 const C = { ink: "#1C2230", text: "#2C3446", muted: "#7A8494", faint: "#AEB6C2", red: "#DA2A34", green: "#17915B", amber: "#C98A16", blue: "#2F6FED" };
 const STATUS_COLOR = { New: C.muted, "Needs review": C.amber, Sourcing: C.muted, Sourced: C.muted, Screened: C.blue, Submitted: C.blue, Shortlist: C.amber, Shortlisted: C.amber, Interview: C.amber, Offer: C.red, Placed: C.green, Rejected: C.red, "Not Suitable": C.red, "In Review": C.amber, Approved: C.green, Matching: C.amber, Available: C.green, Active: C.green, Paid: C.green, Open: C.green, Filled: C.blue, "On Hold": C.amber, Closed: C.muted };
@@ -191,10 +192,11 @@ export default function Page() {
   const [submissions, setSubmissions] = useState([]);
   const [covers, setCovers] = useState([]);
   const [invoices, setInvoices] = useState([]);
+  const [compliance, setCompliance] = useState([]);
 
   useEffect(() => { try { if (localStorage.getItem("rt_auth") === "1") setAuthed(true); } catch {} setReady(true); }, []);
 
-  const setters = { candidates: setTeachers, lsas: setLsas, vacancies: setVacancies, pipeline: setPipeline, schools: setSchools, tasks: setTasks, bookings: setBookings, attendance: setAttendance, submissions: setSubmissions, covers: setCovers, invoices: setInvoices };
+  const setters = { candidates: setTeachers, lsas: setLsas, vacancies: setVacancies, pipeline: setPipeline, schools: setSchools, tasks: setTasks, bookings: setBookings, attendance: setAttendance, submissions: setSubmissions, covers: setCovers, invoices: setInvoices, compliance_docs: setCompliance };
   const reloadTable = async (t) => { if (!supabase) return; const { data } = await supabase.from(t).select("*").order("created_at", { ascending: false }); setters[t](data || []); };
   const loadAll = async () => { if (!supabase) return; await Promise.all(Object.keys(setters).map(reloadTable)); };
   useEffect(() => { if (authed) loadAll(); }, [authed]);
@@ -333,7 +335,7 @@ export default function Page() {
           {view === "lsa-add" && <Extract lsaMode teachersCount={teachers.length} existing={[...teachers.map((t) => t.name), ...lsas.map((l) => l.name)]} onSaved={loadAll} />}
 
           {view === "t-database" && !selT && <TeacherDB teachers={teachers} onSelect={setSelT} onAdd={(r) => insertRow("candidates", r)} onDel={(id) => deleteRow("candidates", id)} />}
-          {view === "t-database" && selT && <TeacherProfile t={teachers.find((x) => x.id === selT)} onBack={() => setSelT(null)} onSave={(p) => updateRow("candidates", selT, p)} onDelete={() => { if (confirm("Delete this candidate permanently?")) { deleteRow("candidates", selT); setSelT(null); } }} />}
+          {view === "t-database" && selT && <TeacherProfile t={teachers.find((x) => x.id === selT)} docs={compliance.filter((x) => x.candidate_id === selT)} onBack={() => setSelT(null)} onSave={(p) => updateRow("candidates", selT, p)} onDelete={() => { if (confirm("Delete this candidate permanently?")) { deleteRow("candidates", selT); setSelT(null); } }} onRefreshDocs={() => reloadTable("compliance_docs")} />}
           {view === "finance" && <Finance invoices={invoices} people={allPeople} onCreate={createInvoice} onUpdate={(id, p) => updateRow("invoices", id, p)} onDel={(id) => deleteRow("invoices", id)} />}
 
           {view === "t-vacancies" && !selV && <Vacancies rows={vacancies} onOpen={setSelV} onAdd={(r) => insertRow("vacancies", r)} onUpdate={(id, p) => updateRow("vacancies", id, p)} onDel={(id) => deleteRow("vacancies", id)} onImport={(rows) => importRows("vacancies", rows)} />}
@@ -586,11 +588,19 @@ function TeacherDB({ teachers, onSelect, onAdd, onDel }) {
   );
 }
 
-function TeacherProfile({ t, onBack, onSave, onDelete }) {
+function TeacherProfile({ t, docs, onBack, onSave, onDelete, onRefreshDocs }) {
   const [edit, setEdit] = useState(false); const [d, setD] = useState(t);
   useEffect(() => setD(t), [t]); if (!d) return null;
   const set = (k, v) => setD((x) => ({ ...x, [k]: v }));
   const save = () => { onSave({ spec: d.spec, curriculum: d.curriculum, qual: d.qual, email: d.email, phone: d.phone, status: d.status, location: d.location, salary: d.salary, visa: d.visa, availability: d.availability, notes: d.notes }); setEdit(false); };
+  const uploadLink = typeof window !== "undefined" ? window.location.origin + "/upload/" + d.id : "";
+  const gotDocs = Array.isArray(docs) ? docs : [];
+  const requestDocs = () => {
+    const subject = encodeURIComponent("rTriibe — please upload your compliance documents");
+    const body = encodeURIComponent("Hi " + (d.name || "") + ",\n\nPlease upload your compliance documents using your secure link below:\n" + uploadLink + "\n\nYou'll see a labelled slot for each document (passport, degree certificate, teaching qualification, Emirates ID, references). Drop each file into the matching slot.\n\nThank you,\nOthman\nrTriibe");
+    window.location.href = "mailto:" + (d.email || "") + "?subject=" + subject + "&body=" + body;
+  };
+  const copyLink = () => { navigator.clipboard.writeText(uploadLink).then(() => alert("Upload link copied.")); };
   return (
     <div className="x-page">
       <button className="x-back" onClick={onBack}><ArrowLeft size={15} /> Back to database</button>
@@ -615,6 +625,12 @@ function TeacherProfile({ t, onBack, onSave, onDelete }) {
       </div>
       {d.verbatim_experience && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Experience — exactly as written on the CV</h2></div><div className="x-verbatim">{d.verbatim_experience}</div></div>}
       {d.verbatim_qualifications && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Qualifications — exactly as written</h2></div><div className="x-verbatim">{d.verbatim_qualifications}</div></div>}
+      <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Compliance documents</h2><span className="x-pmeta">{gotDocs.length} of {DOC_TYPES.length} received</span></div>
+        <div className="x-docreq"><button className="x-primary" onClick={requestDocs}><Mail size={15} /> Request documents</button><button className="x-ghost" onClick={copyLink}><StickyNote size={14} /> Copy upload link</button><button className="x-ghost" onClick={onRefreshDocs}>Refresh</button></div>
+        <div className="x-doclist">{DOC_TYPES.map((type) => { const r = gotDocs.find((x) => x.doc_type === type); return (
+          <div key={type} className="x-docrow"><div className="x-docname">{r ? <CheckCircle2 size={15} color={C.green} /> : <ShieldAlert size={15} color={C.faint} />} {type}</div>{r ? <button className="x-ghost sm" onClick={() => window.open(r.file_url, "_blank")}><Download size={13} /> {r.file_name}</button> : <span className="x-docmiss">Missing</span>}</div>
+        ); })}</div>
+      </div>
       <div className="x-profactions"><button className="x-ghost" onClick={() => d.cv_url ? window.open(d.cv_url, "_blank") : alert("No file stored for this candidate. Re-extract the CV through the system to enable download.")}><Download size={15} /> Download CV</button><button className="x-ghost"><Briefcase size={15} /> Match to vacancy</button><button className="x-primary"><Mail size={15} /> Send offer</button><button className="x-ghost" style={{ marginLeft: "auto", color: C.red }} onClick={onDelete}><Trash2 size={15} /> Delete candidate</button></div>
     </div>
   );

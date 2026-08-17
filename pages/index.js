@@ -115,7 +115,7 @@ const NAV = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, kind: "leaf" },
   { id: "extract", label: "Bulk Extract", icon: UploadCloud, kind: "leaf", badge: "CV" },
   { id: "finance", label: "Finance", icon: Receipt, kind: "leaf" },
-  { id: "g-teachers", label: "Teachers", icon: GraduationCap, kind: "group", items: [{ id: "t-database", label: "Database" }, { id: "t-vacancies", label: "Vacancies" }, { id: "t-pipeline", label: "Pipeline" }, { id: "t-covers", label: "Covers" }] },
+  { id: "g-teachers", label: "Teachers", icon: GraduationCap, kind: "group", items: [{ id: "t-database", label: "Database" }, { id: "t-attach", label: "Attach CVs" }, { id: "t-vacancies", label: "Vacancies" }, { id: "t-pipeline", label: "Pipeline" }, { id: "t-covers", label: "Covers" }] },
   { id: "g-lsas", label: "LSAs", icon: Heart, kind: "group", items: [{ id: "lsa-dashboard", label: "LSA Dashboard" }, { id: "lsa-directory", label: "Directory" }, { id: "lsa-bookings", label: "Bookings" }, { id: "lsa-attendance", label: "Attendance" }, { id: "lsa-add", label: "Add LSAs" }] },
   { id: "g-tasks", label: "Tasks", icon: ListChecks, kind: "group", items: [{ id: "tasks-todo", label: "To-do" }, { id: "tasks-log", label: "Daily log" }] },
   { id: "g-schools", label: "Schools", icon: Building2, kind: "group", items: [{ id: "schools-list", label: "School list" }] },
@@ -341,6 +341,7 @@ export default function Page() {
           {view === "t-vacancies" && !selV && <Vacancies rows={vacancies} onOpen={setSelV} onAdd={(r) => insertRow("vacancies", r)} onUpdate={(id, p) => updateRow("vacancies", id, p)} onDel={(id) => deleteRow("vacancies", id)} onImport={(rows) => importRows("vacancies", rows)} />}
           {view === "t-vacancies" && selV && <VacancyDetail vacancy={vacancies.find((v) => v.id === selV)} candidates={teachers} subs={submissions.filter((s) => s.vacancy_id === selV)} onBack={() => setSelV(null)} onAddSub={addSubmission} onUpdateSub={updateSubmission} onDelSub={delSubmission} />}
           {view === "t-covers" && <Covers rows={covers} people={teacherPeople} onAdd={(r) => insertRow("covers", r)} onUpdate={(id, p) => updateRow("covers", id, p)} onDel={(id) => deleteRow("covers", id)} />}
+          {view === "t-attach" && <AttachFiles candidates={teachers} people={teacherPeople} onDone={() => reloadTable("candidates")} />}
           {view === "t-pipeline" && <PipelineView rows={pipeline} vacancies={vacancies} people={allPeople} onAdd={(r) => insertRow("pipeline", r)} onUpdate={updatePipelineRow} onDel={(id) => deleteRow("pipeline", id)} onImport={(rows) => importRows("pipeline", rows)} />}
 
           {view === "lsa-dashboard" && <LsaDashboard lsas={lsas} go={openLeaf} />}
@@ -1217,6 +1218,119 @@ function Finance({ invoices, people, onCreate, onUpdate, onDel }) {
         </table></div>
       )}
       {modal && <FormModal title="New invoice" fields={INV_FIELDS} people={people} initial={{ kind: "Teacher" }} onClose={() => setModal(false)} onSave={(d) => { onCreate(d); setModal(false); }} />}
+    </div>
+  );
+}
+
+/* ======================= ATTACH ORIGINAL FILES ======================= */
+async function extractFileText(file) {
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  try {
+    if (ext === "pdf") {
+      const pdfjs = await import("pdfjs-dist/build/pdf");
+      pdfjs.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      const ab = await file.arrayBuffer();
+      const pdf = await pdfjs.getDocument({ data: ab }).promise;
+      let out = "";
+      for (let p = 1; p <= pdf.numPages; p++) { const page = await pdf.getPage(p); const c = await page.getTextContent(); out += c.items.map((it) => it.str).join(" ") + "\n"; }
+      return out;
+    }
+    if (ext === "docx") { const ab = await file.arrayBuffer(); const m = await import("mammoth/mammoth.browser"); const mammoth = m.default || m; const { value } = await mammoth.extractRawText({ arrayBuffer: ab }); return value || ""; }
+  } catch { return ""; }
+  return "";
+}
+const digits = (s) => String(s || "").replace(/\D/g, "");
+function AttachFiles({ candidates, people, onDone }) {
+  const [pending, setPending] = useState([]); // files needing manual assign: {file, name}
+  const [done, setDone] = useState([]); // {name, candidate, how}
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const norm = (s) => String(s || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+
+  const matchByName = (fname) => {
+    const f = " " + norm(fname) + " ";
+    const byRef = candidates.filter((c) => c.ref && f.includes(" " + norm(c.ref) + " "));
+    if (byRef.length === 1) return byRef[0];
+    const byName = candidates.filter((c) => { const toks = norm(c.name).split(" ").filter((t) => t.length >= 2); return toks.length >= 2 && toks.every((t) => f.includes(" " + t + " ")); });
+    if (byName.length === 1) return byName[0];
+    return null;
+  };
+
+  const matchByContent = async (file) => {
+    const text = await extractFileText(file);
+    if (!text) return null;
+    const low = text.toLowerCase();
+    // email
+    const emails = (low.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g) || []);
+    for (const em of emails) { const hit = candidates.find((c) => c.email && c.email.toLowerCase().trim() === em); if (hit) return { c: hit, how: "email" }; }
+    // phone (match on last 9 digits)
+    const cellDigits = digits(text);
+    if (cellDigits.length >= 9) {
+      const hit = candidates.find((c) => { const cd = digits(c.phone); return cd.length >= 9 && cellDigits.includes(cd.slice(-9)); });
+      if (hit) return { c: hit, how: "phone" };
+    }
+    // full name in text
+    const flat = " " + norm(text) + " ";
+    const byName = candidates.filter((c) => { const toks = norm(c.name).split(" ").filter((t) => t.length >= 2); return toks.length >= 2 && toks.every((t) => flat.includes(" " + t + " ")); });
+    if (byName.length === 1) return { c: byName[0], how: "name in file" };
+    return null;
+  };
+
+  const store = async (candidate, file) => {
+    const path = candidate.id + "/" + Date.now() + "-" + file.name;
+    const { error: upErr } = await supabase.storage.from("cvs").upload(path, file, { upsert: true });
+    if (upErr) throw upErr;
+    const { data: pub } = supabase.storage.from("cvs").getPublicUrl(path);
+    const { error: updErr } = await supabase.from("candidates").update({ cv_url: pub.publicUrl }).eq("id", candidate.id);
+    if (updErr) throw updErr;
+  };
+
+  const onDrop = async (files) => {
+    if (!files.length || !hasSupabase) return;
+    setBusy(true); setMsg("Matching " + files.length + " files…"); const stillPending = []; const justDone = [];
+    for (const file of Array.from(files)) {
+      let match = matchByName(file.name); let how = "filename";
+      if (!match) { const byContent = await matchByContent(file); if (byContent) { match = byContent.c; how = byContent.how; } }
+      if (match) { try { await store(match, file); justDone.push({ name: file.name, candidate: match.name, how }); } catch (e) { stillPending.push({ file, name: file.name }); } }
+      else stillPending.push({ file, name: file.name });
+    }
+    setDone((d) => [...justDone, ...d]);
+    setPending((p) => [...stillPending, ...p]);
+    setMsg("Matched " + justDone.length + " of " + files.length + " automatically." + (stillPending.length ? " " + stillPending.length + " couldn't be identified — assign below." : ""));
+    setBusy(false); onDone();
+  };
+
+  const assign = async (item, candidateId) => {
+    const candidate = candidates.find((c) => c.id === candidateId);
+    if (!candidate) return;
+    setBusy(true);
+    try { await store(candidate, item.file); setDone((d) => [{ name: item.name, candidate: candidate.name, how: "manual" }, ...d]); setPending((p) => p.filter((x) => x !== item)); onDone(); }
+    catch (e) { alert("Upload failed: " + (e.message || e) + "\n\nMake sure a public bucket named 'cvs' exists."); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="x-page">
+      <div className="x-headrow"><div><h1 className="x-h1">Attach original CVs</h1><p className="x-sub">Drop your resume files. The app matches each to a candidate by filename, or by reading the email / phone inside the file — free, no AI. Only files it truly can't identify need a manual pick.</p></div></div>
+      <label className="x-drop">
+        <UploadCloud size={26} color={C.muted} />
+        <div className="x-dropt">{busy ? "Working…" : "Drop resume files here or click to choose"}</div>
+        <div className="x-dropm">PDF or Word matched automatically · images may need manual assign</div>
+        <input type="file" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: "none" }} disabled={busy} onChange={(e) => { onDrop(e.target.files); e.target.value = ""; }} />
+      </label>
+      {msg && <div className="x-note">{msg}</div>}
+
+      {pending.length > 0 && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Couldn't identify — assign manually</h2><span className="x-pmeta">{pending.length} left</span></div>
+        {pending.map((item, i) => <div key={i} className="x-assignrow">
+          <div className="x-assignname">{item.name}</div>
+          <div className="x-assignpick"><PersonField value="" people={people} onPick={(p) => { if (p.id) assign(item, p.id); }} /></div>
+        </div>)}
+      </div>}
+
+      {done.length > 0 && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Attached</h2><span className="x-pmeta">{done.length} done</span></div>
+        <div className="x-doclist">{done.map((r, i) => <div key={i} className="x-docrow"><div className="x-docname"><CheckCircle2 size={15} color={C.green} /> {r.name}</div><span className="mut">→ {r.candidate} · {r.how}</span></div>)}</div>
+      </div>}
     </div>
   );
 }

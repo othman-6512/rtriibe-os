@@ -290,3 +290,12 @@ textarea.x-input { resize: vertical; }
 .x-tan { font-size: 13px; font-weight: 600; color: #1C2230; }
 .x-tam { font-size: 11px; color: #7A8494; }
 .x-kindtag { display: inline-block; margin-left: 8px; padding: 1px 7px; font-size: 10px; font-weight: 700; letter-spacing: .5px; color: #2F6FED; background: #2F6FED14; border-radius: 20px; vertical-align: 1px; }
+
+/* compliance documents */
+.x-docreq { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.x-doclist { margin-top: 6px; }
+.x-docrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid #F1F2F5; }
+.x-docrow:last-child { border-bottom: none; }
+.x-docname { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: #1C2230; }
+.x-docmiss { font-size: 12px; font-weight: 700; color: #A0A7B4; }
+.x-ghost.sm { padding: 5px 10px; font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -280,3 +280,13 @@ textarea.x-input { resize: vertical; }
 /* row error flag */
 .x-rowerr td { background: #FDECEC !important; }
 .x-rowerr:hover td { background: #FBE3E3 !important; }
+
+/* typeahead */
+.x-typeahead { position: relative; }
+.x-tadrop { position: absolute; top: 100%; left: 0; right: 0; z-index: 40; margin-top: 4px; background: #fff; border: 1px solid #E8EAEF; border-radius: 10px; box-shadow: 0 12px 30px rgba(20,25,40,.12); overflow: hidden; }
+.x-taitem { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: 9px 12px; background: none; border: none; border-bottom: 1px solid #F1F2F5; cursor: pointer; }
+.x-taitem:last-child { border-bottom: none; }
+.x-taitem:hover { background: #F6F7F9; }
+.x-tan { font-size: 13px; font-weight: 600; color: #1C2230; }
+.x-tam { font-size: 11px; color: #7A8494; }
+.x-kindtag { display: inline-block; margin-left: 8px; padding: 1px 7px; font-size: 10px; font-weight: 700; letter-spacing: .5px; color: #2F6FED; background: #2F6FED14; border-radius: 20px; vertical-align: 1px; }

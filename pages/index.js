@@ -4,7 +4,7 @@ import {
   Wallet, Search, Plus, Bell, Download, ChevronRight, ChevronDown, X,
   Mail, Pencil, Check, Trash2, MapPin, Users, Briefcase, CreditCard,
   StickyNote, ArrowLeft, ShieldAlert, CheckCircle2, Sparkles, Star, Clock,
-  Receipt, AlertTriangle, Calendar,
+  Receipt, AlertTriangle, Calendar, FileText,
 } from "lucide-react";
 import { supabase, hasSupabase } from "../lib/supabaseClient";
 import { DOC_TYPES } from "../lib/compliance";
@@ -601,6 +601,16 @@ function TeacherProfile({ t, docs, onBack, onSave, onDelete, onRefreshDocs }) {
     window.location.href = "mailto:" + (d.email || "") + "?subject=" + subject + "&body=" + body;
   };
   const copyLink = () => { navigator.clipboard.writeText(uploadLink).then(() => alert("Upload link copied.")); };
+  const [cvOpen, setCvOpen] = useState(false);
+  const seedCv = () => (d.cv_data && Object.keys(d.cv_data).length) ? d.cv_data : { title: d.spec || "", profile: "", expertise: "", education: d.verbatim_qualifications || "", development: "", experience: [] };
+  const [cv, setCv] = useState(seedCv());
+  useEffect(() => { setCv(seedCv()); }, [t]);
+  const setCvK = (k, v) => setCv((x) => ({ ...x, [k]: v }));
+  const setExp = (i, k, v) => setCv((x) => ({ ...x, experience: x.experience.map((e, j) => j === i ? { ...e, [k]: v } : e) }));
+  const addExp = () => setCv((x) => ({ ...x, experience: [...(x.experience || []), { role: "", org: "", dates: "", bullets: "" }] }));
+  const delExp = (i) => setCv((x) => ({ ...x, experience: x.experience.filter((e, j) => j !== i) }));
+  const saveCv = () => onSave({ cv_data: cv });
+  const genCv = () => generateRtriibeCv({ ...d, cv_data: cv });
   return (
     <div className="x-page">
       <button className="x-back" onClick={onBack}><ArrowLeft size={15} /> Back to database</button>
@@ -625,6 +635,24 @@ function TeacherProfile({ t, docs, onBack, onSave, onDelete, onRefreshDocs }) {
       </div>
       {d.verbatim_experience && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Experience — exactly as written on the CV</h2></div><div className="x-verbatim">{d.verbatim_experience}</div></div>}
       {d.verbatim_qualifications && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Qualifications — exactly as written</h2></div><div className="x-verbatim">{d.verbatim_qualifications}</div></div>}
+      <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">rTriibe CV</h2><span className="x-pmeta">Generate a formatted CV in the house design — free</span></div>
+        <div className="x-docreq"><button className="x-primary" onClick={genCv}><FileText size={15} /> Generate rTriibe CV</button><button className="x-ghost" onClick={() => setCvOpen((o) => !o)}><Pencil size={14} /> {cvOpen ? "Hide editor" : "Edit CV content"}</button></div>
+        {cvOpen && <div className="x-cvedit">
+          <div className="x-formfield"><span className="x-formlabel">Title (defaults to specialization)</span><input className="x-input" value={cv.title || ""} onChange={(e) => setCvK("title", e.target.value)} /></div>
+          <div className="x-formfield full"><span className="x-formlabel">Professional profile (paragraph)</span><textarea className="x-input" rows={4} value={cv.profile || ""} onChange={(e) => setCvK("profile", e.target.value)} /></div>
+          <div className="x-formfield"><span className="x-formlabel">Expertise (one per line)</span><textarea className="x-input" rows={4} value={cv.expertise || ""} onChange={(e) => setCvK("expertise", e.target.value)} /></div>
+          <div className="x-formfield"><span className="x-formlabel">Professional development (one per line)</span><textarea className="x-input" rows={4} value={cv.development || ""} onChange={(e) => setCvK("development", e.target.value)} /></div>
+          <div className="x-formfield full"><span className="x-formlabel">Education (blank line between entries; first line is the title)</span><textarea className="x-input" rows={5} value={cv.education || ""} onChange={(e) => setCvK("education", e.target.value)} /></div>
+          <div className="x-formfield full"><span className="x-formlabel">Teaching experience</span>
+            {(cv.experience || []).map((e, i) => <div key={i} className="x-expedit">
+              <div className="x-exprow"><input className="x-input" placeholder="Role" value={e.role || ""} onChange={(ev) => setExp(i, "role", ev.target.value)} /><input className="x-input" placeholder="School / employer" value={e.org || ""} onChange={(ev) => setExp(i, "org", ev.target.value)} /><input className="x-input" placeholder="Dates" value={e.dates || ""} onChange={(ev) => setExp(i, "dates", ev.target.value)} /><button className="x-ic" onClick={() => delExp(i)}><Trash2 size={13} /></button></div>
+              <textarea className="x-input" rows={3} placeholder="Bullet points, one per line" value={e.bullets || ""} onChange={(ev) => setExp(i, "bullets", ev.target.value)} />
+            </div>)}
+            <button className="x-ghost" onClick={addExp}><Plus size={14} /> Add experience entry</button>
+          </div>
+          <button className="x-primary" onClick={saveCv}><Check size={15} /> Save CV content</button>
+        </div>}
+      </div>
       <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Compliance documents</h2><span className="x-pmeta">{gotDocs.length} of {DOC_TYPES.length} received</span></div>
         <div className="x-docreq"><button className="x-primary" onClick={requestDocs}><Mail size={15} /> Request documents</button><button className="x-ghost" onClick={copyLink}><StickyNote size={14} /> Copy upload link</button><button className="x-ghost" onClick={onRefreshDocs}>Refresh</button></div>
         <div className="x-doclist">{DOC_TYPES.map((type) => { const items = gotDocs.filter((x) => x.doc_type === type); return (
@@ -1006,6 +1034,88 @@ function Covers({ rows, people, onAdd, onUpdate, onDel }) {
 }
 
 /* ============================ FINANCE ============================ */
+function generateRtriibeCv(c) {
+  const cvd = c.cv_data || {};
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const lines = (s) => String(s || "").split(/\r?\n/).map((x) => x.replace(/^[•▪\-\u2022]\s*/, "").trim()).filter(Boolean);
+  const first = String(c.name || "").trim().split(/\s+/)[0] || "Candidate";
+  const title = cvd.title || c.spec || "Teacher";
+  const loc = c.location || "";
+  const profile = cvd.profile || "";
+  const expertise = lines(cvd.expertise);
+  const development = lines(cvd.development);
+  const eduSrc = cvd.education || c.verbatim_qualifications || "";
+  const eduBlocks = String(eduSrc).split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  const education = (eduBlocks.length > 1 ? eduBlocks : lines(eduSrc).map((l) => l)).map((b) => { const ls = lines(b); return { t: ls[0] || b, s: ls.slice(1).join(" · ") }; });
+  let experience = (Array.isArray(cvd.experience) && cvd.experience.length) ? cvd.experience.map((e) => ({ role: e.role || "", org: e.org || "", dates: e.dates || "", bullets: lines(e.bullets) })) : [];
+  if (!experience.length && c.verbatim_experience) experience = [{ role: "", org: "", dates: "", bullets: lines(c.verbatim_experience) }];
+  const tags = [c.curriculum, c.spec, c.uae_years ? c.uae_years + " yrs UAE" : "", loc].filter(Boolean);
+
+  const sec = (label, inner) => inner ? `<div class="sec"><div class="sech">${esc(label)}</div>${inner}</div>` : "";
+  const eduHtml = education.length ? education.map((e) => `<div class="edu"><div class="edut">${esc(e.t)}</div>${e.s ? `<div class="edus">${esc(e.s)}</div>` : ""}</div>`).join("") : "";
+  const devHtml = development.length ? `<ul class="ul">${development.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+  const expertiseHtml = expertise.length ? `<ul class="ul">${expertise.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+  const expHtml = experience.length ? experience.map((e) => `<div class="job">${(e.role || e.org || e.dates) ? `<div class="jobt">${esc(e.role)}</div><div class="jobm">${[esc(e.org), esc(e.dates)].filter(Boolean).join(" · ")}</div>` : ""}${e.bullets.length ? `<ul class="ul">${e.bullets.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>` : ""}</div>`).join("") : "";
+
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(first)} — ${esc(title)}</title><style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,Helvetica,sans-serif;color:#1C2230;background:#eceff3}
+    .bar{display:flex;gap:10px;padding:14px;max-width:794px;margin:0 auto}
+    .btn{padding:11px 20px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}
+    .btn.red{background:#DA2A34;color:#fff}.btn.grey{background:#dfe3ea;color:#1C2230}
+    .sheet{width:794px;min-height:1123px;margin:0 auto 30px;background:#fff;padding:38px 40px 60px;position:relative}
+    .top{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #DA2A34;padding-bottom:12px}
+    .brand{font-size:26px;font-weight:800;letter-spacing:-.5px}.brand span{color:#DA2A34}
+    .tag{font-size:9.5px;font-weight:700;letter-spacing:2px;color:#7A8494}
+    .name{font-size:32px;font-weight:800;margin-top:20px}
+    .role{font-size:13px;font-weight:700;letter-spacing:2px;color:#4472A8;margin-top:2px;text-transform:uppercase}
+    .loc{font-size:11px;color:#5B6472;margin-top:5px}
+    .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+    .tags span{font-size:10px;font-weight:700;color:#2E75B6;background:#2E75B614;border:1px solid #2E75B630;border-radius:20px;padding:3px 10px}
+    .cols{display:flex;gap:26px;margin-top:22px}
+    .left{width:33%}.right{width:67%}
+    .sec{margin-bottom:20px}
+    .sech{font-size:11px;font-weight:800;letter-spacing:1.2px;color:#4472A8;text-transform:uppercase;border-bottom:2px solid #0E9ED4;padding-bottom:4px;margin-bottom:9px}
+    .prof{font-size:11.5px;line-height:1.65;color:#2b3242}
+    .edu{margin-bottom:10px}
+    .edut{font-size:11px;font-weight:700;line-height:1.4}
+    .edus{font-size:10.5px;color:#5B6472;margin-top:1px}
+    .ul{list-style:none;margin:0;padding:0}
+    .ul li{font-size:11px;line-height:1.55;padding-left:12px;position:relative;margin-bottom:4px;color:#2b3242}
+    .ul li:before{content:"";position:absolute;left:0;top:6px;width:5px;height:5px;border-radius:50%;background:#0E9ED4}
+    .job{margin-bottom:13px}
+    .jobt{font-size:12px;font-weight:700}
+    .jobm{font-size:10.5px;color:#5B6472;font-style:italic;margin:1px 0 5px}
+    .foot{position:absolute;left:40px;right:40px;bottom:24px;border-top:1px solid #e6e8ee;padding-top:10px;text-align:center;font-size:9px;color:#8A93A2;letter-spacing:.3px}
+    @media print{.bar{display:none}body{background:#fff}.sheet{margin:0;width:auto;box-shadow:none}@page{size:A4;margin:0}}
+  </style></head><body>
+    <div class="bar"><button class="btn red" onclick="window.print()">Download / Print PDF</button><button class="btn grey" onclick="window.close()">&larr; Close</button></div>
+    <div class="sheet">
+      <div class="top"><div class="brand"><span>r</span>Triibe</div><div class="tag">EDUCATION RECRUITMENT &nbsp;|&nbsp; UK &amp; UAE</div></div>
+      <div class="name">${esc(first)}</div>
+      <div class="role">${esc(title)}</div>
+      ${loc ? `<div class="loc">Based in ${esc(loc)}</div>` : ""}
+      ${tags.length ? `<div class="tags">${tags.map((t) => `<span>${esc(t)}</span>`).join("")}</div>` : ""}
+      <div class="cols">
+        <div class="left">
+          ${sec("Education", eduHtml)}
+          ${sec("Professional Development", devHtml)}
+          ${sec("Expertise", expertiseHtml)}
+        </div>
+        <div class="right">
+          ${profile ? sec("Professional Profile", `<div class="prof">${esc(profile)}</div>`) : ""}
+          ${sec("Teaching Experience", expHtml)}
+          ${sec("References", `<div class="prof">Available on request via rTriibe.</div>`)}
+        </div>
+      </div>
+      <div class="foot">rTriibe FZCO &nbsp;|&nbsp; TRN 100452871500003 &nbsp;·&nbsp; Candidate presented by rTriibe — contact details withheld</div>
+    </div>
+  </body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) { alert("Please allow pop-ups so the CV can open, then try again."); return; }
+  w.document.write(html); w.document.close();
+}
+
 function openInvoice(inv) {
   const fee = Number(inv.amount ?? inv.fee ?? 0);
   const vat = Math.round(fee * 0.05 * 100) / 100;

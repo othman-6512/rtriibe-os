@@ -299,3 +299,11 @@ textarea.x-input { resize: vertical; }
 .x-docname { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: #1C2230; }
 .x-docmiss { font-size: 12px; font-weight: 700; color: #A0A7B4; }
 .x-ghost.sm { padding: 5px 10px; font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* rTriibe CV editor */
+.x-cvedit { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #F1F2F5; }
+.x-cvedit .full { grid-column: 1 / -1; }
+.x-expedit { border: 1px solid #E8EAEF; border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+.x-exprow { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+.x-exprow .x-input { margin: 0; }
+@media (max-width: 720px) { .x-cvedit { grid-template-columns: 1fr; } .x-exprow { flex-wrap: wrap; } }

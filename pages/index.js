@@ -1248,7 +1248,7 @@ function AttachFiles({ candidates, people, onDone }) {
   const [progress, setProgress] = useState({ i: 0, total: 0 });
   const [busy, setBusy] = useState(false);
 
-  const norm = (s) => String(s || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
   const nameTokens = (name) => norm(name).split(" ").filter((t) => t.length >= 2);
 
   const matchByName = (fname) => {

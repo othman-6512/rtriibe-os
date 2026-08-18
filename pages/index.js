@@ -197,7 +197,7 @@ export default function Page() {
   useEffect(() => { try { if (localStorage.getItem("rt_auth") === "1") setAuthed(true); } catch {} setReady(true); }, []);
 
   const setters = { candidates: setTeachers, lsas: setLsas, vacancies: setVacancies, pipeline: setPipeline, schools: setSchools, tasks: setTasks, bookings: setBookings, attendance: setAttendance, submissions: setSubmissions, covers: setCovers, invoices: setInvoices, compliance_docs: setCompliance };
-  const reloadTable = async (t) => { if (!supabase) return; const { data } = await supabase.from(t).select("*").order("created_at", { ascending: false }); setters[t](data || []); };
+  const reloadTable = async (t) => { if (!supabase) return; const { data } = await supabase.from(t).select("*").order("created_at", { ascending: false }).range(0, 99999); setters[t](data || []); };
   const loadAll = async () => { if (!supabase) return; await Promise.all(Object.keys(setters).map(reloadTable)); };
   useEffect(() => { if (authed) loadAll(); }, [authed]);
 
@@ -1248,34 +1248,30 @@ function AttachFiles({ candidates, people, onDone }) {
   const [busy, setBusy] = useState(false);
 
   const norm = (s) => String(s || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const nameTokens = (name) => norm(name).split(" ").filter((t) => t.length >= 2);
 
   const matchByName = (fname) => {
     const f = " " + norm(fname) + " ";
     const byRef = candidates.filter((c) => c.ref && f.includes(" " + norm(c.ref) + " "));
     if (byRef.length === 1) return byRef[0];
-    const byName = candidates.filter((c) => { const toks = norm(c.name).split(" ").filter((t) => t.length >= 2); return toks.length >= 2 && toks.every((t) => f.includes(" " + t + " ")); });
+    const byName = candidates.filter((c) => { const t = nameTokens(c.name); return t.length >= 2 && f.includes(" " + t[0] + " ") && f.includes(" " + t[t.length - 1] + " "); });
     if (byName.length === 1) return byName[0];
     return null;
   };
 
   const matchByContent = async (file) => {
     const text = await extractFileText(file);
-    if (!text) return null;
+    const hadText = !!text && text.replace(/\s/g, "").length > 30;
+    if (!hadText) return { c: null, hadText: false };
     const low = text.toLowerCase();
-    // email
-    const emails = (low.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g) || []);
-    for (const em of emails) { const hit = candidates.find((c) => c.email && c.email.toLowerCase().trim() === em); if (hit) return { c: hit, how: "email" }; }
-    // phone (match on last 9 digits)
-    const cellDigits = digits(text);
-    if (cellDigits.length >= 9) {
-      const hit = candidates.find((c) => { const cd = digits(c.phone); return cd.length >= 9 && cellDigits.includes(cd.slice(-9)); });
-      if (hit) return { c: hit, how: "phone" };
-    }
-    // full name in text
+    const emails = low.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g) || [];
+    for (const em of emails) { const hit = candidates.find((c) => c.email && c.email.toLowerCase().trim() === em); if (hit) return { c: hit, how: "email", hadText: true }; }
+    const dd = digits(text);
+    if (dd.length >= 9) { const hit = candidates.find((c) => { const cd = digits(c.phone); return cd.length >= 9 && dd.includes(cd.slice(-9)); }); if (hit) return { c: hit, how: "phone", hadText: true }; }
     const flat = " " + norm(text) + " ";
-    const byName = candidates.filter((c) => { const toks = norm(c.name).split(" ").filter((t) => t.length >= 2); return toks.length >= 2 && toks.every((t) => flat.includes(" " + t + " ")); });
-    if (byName.length === 1) return { c: byName[0], how: "name in file" };
-    return null;
+    const byName = candidates.filter((c) => { const t = nameTokens(c.name); return t.length >= 2 && flat.includes(" " + t[0] + " ") && flat.includes(" " + t[t.length - 1] + " "); });
+    if (byName.length === 1) return { c: byName[0], how: "name in file", hadText: true };
+    return { c: null, hadText: true };
   };
 
   const store = async (candidate, file) => {
@@ -1298,12 +1294,12 @@ function AttachFiles({ candidates, people, onDone }) {
       if (seenNames.has(file.name)) { dupL.push({ name: file.name, candidate: "", reason: "same file twice in this batch" }); }
       else {
         seenNames.add(file.name);
-        let match = matchByName(file.name); let how = "filename";
-        if (!match) { const bc = await matchByContent(file); if (bc) { match = bc.c; how = bc.how; } }
+        let match = matchByName(file.name); let how = "filename"; let reason = "";
+        if (!match) { const bc = await matchByContent(file); if (bc.c) { match = bc.c; how = bc.how; } else { reason = bc.hadText ? "text read, no matching record" : "no readable text (maybe scanned)"; } }
         if (match) {
           if (match.cv_url || attachedIds.has(match.id)) { dupL.push({ name: file.name, candidate: match.name, reason: match.cv_url ? "candidate already has a CV" : "another file already matched this candidate" }); }
-          else { try { await store(match, file); attachedIds.add(match.id); doneL.push({ name: file.name, candidate: match.name, how }); } catch (e) { pendL.push({ file, name: file.name }); } }
-        } else pendL.push({ file, name: file.name });
+          else { try { await store(match, file); attachedIds.add(match.id); doneL.push({ name: file.name, candidate: match.name, how }); } catch (e) { pendL.push({ file, name: file.name, reason: "upload error" }); } }
+        } else pendL.push({ file, name: file.name, reason });
       }
       setProgress({ i: i + 1, total: arr.length });
       if (i % 8 === 0) { setDone([...doneL]); setDupes([...dupL]); setPending([...pendL]); await new Promise((r) => setTimeout(r, 0)); }
@@ -1344,7 +1340,7 @@ function AttachFiles({ candidates, people, onDone }) {
 
       {pending.length > 0 && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Couldn't identify — assign manually</h2><span className="x-pmeta">{pending.length} left</span></div>
         {pending.slice(0, 80).map((item, i) => <div key={i} className="x-assignrow">
-          <div className="x-assignname">{item.name}</div>
+          <div className="x-assignname">{item.name}{item.reason ? <span className="mut" style={{ fontWeight: 400 }}> · {item.reason}</span> : ""}</div>
           <div className="x-assignpick"><PersonField value="" people={people} onPick={(p) => { if (p.id) assign(item, p.id); }} /></div>
         </div>)}
         {pending.length > 80 && <div className="x-empty">+ {pending.length - 80} more — assign these first, they clear as you go</div>}

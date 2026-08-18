@@ -688,7 +688,7 @@ function TeacherProfile({ t, docs, onBack, onSave, onDelete, onRefreshDocs }) {
           <div key={type} className="x-docrow"><div className="x-docname">{items.length ? <CheckCircle2 size={15} color={C.green} /> : <ShieldAlert size={15} color={C.faint} />} {type}{items.length > 1 ? " (" + items.length + ")" : ""}</div>{items.length ? <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>{items.map((r) => <button key={r.id} className="x-ghost sm" onClick={() => window.open(r.file_url, "_blank")}><Download size={13} /> {r.file_name}</button>)}</div> : <span className="x-docmiss">Missing</span>}</div>
         ); })}</div>
       </div>
-      <div className="x-profactions"><button className="x-ghost" onClick={() => d.cv_url ? window.open(d.cv_url, "_blank") : alert("No file stored for this candidate yet. Use 'Upload original file' to store one.")}><Download size={15} /> Download CV</button><label className="x-ghost" style={{ cursor: "pointer" }}><UploadCloud size={15} /> {cvBusy ? "Uploading…" : "Upload original file"}<input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: "none" }} disabled={cvBusy} onChange={(e) => { const f = e.target.files[0]; if (f) uploadOriginal(f); e.target.value = ""; }} /></label><button className="x-ghost" onClick={() => { const n = waNumber(d.phone); if (!n) { alert("No phone number saved for this candidate."); return; } window.open("https://wa.me/" + n, "_blank"); }}><MessageCircle size={15} /> WhatsApp</button><button className="x-ghost"><Briefcase size={15} /> Match to vacancy</button><button className="x-ghost" style={{ marginLeft: "auto", color: C.red }} onClick={onDelete}><Trash2 size={15} /> Delete candidate</button></div>
+      <div className="x-profactions"><button className="x-ghost" onClick={() => d.cv_url ? window.open(d.cv_url, "_blank") : alert("No file stored for this candidate yet. Use 'Upload original file' to store one.")}><Download size={15} /> Download CV</button><label className="x-ghost" style={{ cursor: "pointer" }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) uploadOriginal(f); }}><UploadCloud size={15} /> {cvBusy ? "Uploading…" : "Upload / drop original file"}<input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: "none" }} disabled={cvBusy} onChange={(e) => { const f = e.target.files[0]; if (f) uploadOriginal(f); e.target.value = ""; }} /></label><button className="x-ghost" onClick={() => { const n = waNumber(d.phone); if (!n) { alert("No phone number saved for this candidate."); return; } window.open("https://wa.me/" + n, "_blank"); }}><MessageCircle size={15} /> WhatsApp</button><button className="x-ghost"><Briefcase size={15} /> Match to vacancy</button><button className="x-ghost" style={{ marginLeft: "auto", color: C.red }} onClick={onDelete}><Trash2 size={15} /> Delete candidate</button></div>
     </div>
   );
 }
@@ -1088,52 +1088,57 @@ function generateRtriibeCv(c) {
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(first)} — ${esc(title)}</title><style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:Arial,Helvetica,sans-serif;color:#1C2230;background:#eceff3}
-    .bar{display:flex;gap:10px;padding:14px;max-width:794px;margin:0 auto}
+    body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#222b3a;background:#e9edf2}
+    .bar{display:flex;gap:10px;padding:14px;max-width:820px;margin:0 auto}
     .btn{padding:11px 20px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}
     .btn.red{background:#DA2A34;color:#fff}.btn.grey{background:#dfe3ea;color:#1C2230}
-    .sheet{width:794px;min-height:1123px;margin:0 auto 30px;background:#fff;padding:38px 40px 60px;position:relative}
-    .top{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #DA2A34;padding-bottom:12px}
-    .brand{font-size:26px;font-weight:800;letter-spacing:-.5px}.brand span{color:#DA2A34}
-    .tag{font-size:9.5px;font-weight:700;letter-spacing:2px;color:#7A8494}
-    .name{font-size:32px;font-weight:800;margin-top:20px}
-    .role{font-size:13px;font-weight:700;letter-spacing:2px;color:#4472A8;margin-top:2px;text-transform:uppercase}
-    .loc{font-size:11px;color:#5B6472;margin-top:5px}
-    .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
-    .tags span{font-size:10px;font-weight:700;color:#2E75B6;background:#2E75B614;border:1px solid #2E75B630;border-radius:20px;padding:3px 10px}
-    .cols{display:flex;gap:26px;margin-top:22px}
-    .left{width:33%}.right{width:67%}
-    .sec{margin-bottom:20px}
-    .sech{font-size:11px;font-weight:800;letter-spacing:1.2px;color:#4472A8;text-transform:uppercase;border-bottom:2px solid #0E9ED4;padding-bottom:4px;margin-bottom:9px}
-    .prof{font-size:11.5px;line-height:1.65;color:#2b3242}
-    .edu{margin-bottom:10px}
-    .edut{font-size:11px;font-weight:700;line-height:1.4}
-    .edus{font-size:10.5px;color:#5B6472;margin-top:1px}
-    .ul{list-style:none;margin:0;padding:0}
-    .ul li{font-size:11px;line-height:1.55;padding-left:12px;position:relative;margin-bottom:4px;color:#2b3242}
-    .ul li:before{content:"";position:absolute;left:0;top:6px;width:5px;height:5px;border-radius:50%;background:#0E9ED4}
-    .job{margin-bottom:13px}
-    .jobt{font-size:12px;font-weight:700}
-    .jobm{font-size:10.5px;color:#5B6472;font-style:italic;margin:1px 0 5px}
-    .foot{position:absolute;left:40px;right:40px;bottom:24px;border-top:1px solid #e6e8ee;padding-top:10px;text-align:center;font-size:9px;color:#8A93A2;letter-spacing:.3px}
-    @media print{.bar{display:none}body{background:#fff}.sheet{margin:0;width:auto;box-shadow:none}@page{size:A4;margin:0}}
+    .sheet{width:820px;min-height:1160px;margin:0 auto 30px;background:#fff;position:relative;padding:0 0 52px}
+    .head{padding:34px 44px 0}
+    .brandrow{display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:14px;border-bottom:3px solid #DA2A34}
+    .brand{font-size:27px;font-weight:800;letter-spacing:-.5px;color:#1C2230}.brand span{color:#DA2A34}
+    .tagl{font-size:9px;font-weight:700;letter-spacing:2.5px;color:#95a0b0}
+    .name{font-size:34px;font-weight:800;letter-spacing:-.5px;line-height:1;margin-top:22px}
+    .role{font-size:13px;font-weight:700;letter-spacing:3px;color:#2F6FAF;text-transform:uppercase;margin-top:8px}
+    .loc{font-size:11px;color:#6b7482;margin-top:7px}
+    .pills{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
+    .pills span{font-size:9.5px;font-weight:700;color:#2F6FAF;background:#eaf1fb;border-radius:20px;padding:4px 11px}
+    .body{display:flex;margin-top:24px}
+    .left{width:34%;background:#f4f7fb;padding:26px 22px}
+    .right{width:66%;padding:26px 30px 0 28px}
+    .sec{margin-bottom:22px}
+    .sech{font-size:11px;font-weight:800;letter-spacing:1.5px;color:#1C2230;text-transform:uppercase;margin-bottom:12px;padding-bottom:7px;position:relative}
+    .sech:after{content:"";position:absolute;left:0;bottom:0;width:34px;height:2.5px;background:#DA2A34}
+    .prof{font-size:11.5px;line-height:1.7;color:#3a4353}
+    .edu{margin-bottom:13px}
+    .edut{font-size:11px;font-weight:700;line-height:1.35;color:#1C2230}
+    .edus{font-size:10px;color:#6b7482;margin-top:2px;line-height:1.4}
+    .ul{list-style:none}
+    .ul li{font-size:10.5px;line-height:1.55;padding-left:14px;position:relative;margin-bottom:6px;color:#3a4353}
+    .ul li:before{content:"";position:absolute;left:0;top:6px;width:5px;height:5px;border-radius:1px;background:#DA2A34}
+    .job{margin-bottom:16px;page-break-inside:avoid}
+    .jobt{font-size:12.5px;font-weight:700;color:#1C2230}
+    .jobm{font-size:10.5px;color:#2F6FAF;font-weight:600;margin:2px 0 7px}
+    .foot{position:absolute;left:0;right:0;bottom:0;padding:12px 44px;border-top:1px solid #eceef2;text-align:center;font-size:8.5px;color:#95a0b0;letter-spacing:.4px}
+    @media print{.bar{display:none}body{background:#fff}.sheet{margin:0;width:auto;min-height:auto;box-shadow:none}@page{size:A4;margin:0}}
   </style></head><body>
     <div class="bar"><button class="btn red" onclick="window.print()">Download / Print PDF</button><button class="btn grey" onclick="window.close()">&larr; Close</button></div>
     <div class="sheet">
-      <div class="top"><div class="brand"><span>r</span>Triibe</div><div class="tag">EDUCATION RECRUITMENT &nbsp;|&nbsp; UK &amp; UAE</div></div>
-      <div class="name">${esc(first)}</div>
-      <div class="role">${esc(title)}</div>
-      ${loc ? `<div class="loc">Based in ${esc(loc)}</div>` : ""}
-      ${tags.length ? `<div class="tags">${tags.map((t) => `<span>${esc(t)}</span>`).join("")}</div>` : ""}
-      <div class="cols">
+      <div class="head">
+        <div class="brandrow"><div class="brand"><span>r</span>Triibe</div><div class="tagl">EDUCATION RECRUITMENT &nbsp;|&nbsp; UK &amp; UAE</div></div>
+        <div class="name">${esc(first)}</div>
+        <div class="role">${esc(title)}</div>
+        ${loc ? `<div class="loc">Based in ${esc(loc)}</div>` : ""}
+        ${tags.length ? `<div class="pills">${tags.map((t) => `<span>${esc(t)}</span>`).join("")}</div>` : ""}
+      </div>
+      <div class="body">
         <div class="left">
-          ${sec("Education", eduHtml)}
-          ${sec("Professional Development", devHtml)}
           ${sec("Expertise", expertiseHtml)}
+          ${sec("Education", eduHtml)}
+          ${sec("Professional development", devHtml)}
         </div>
         <div class="right">
-          ${profile ? sec("Professional Profile", `<div class="prof">${esc(profile)}</div>`) : ""}
-          ${sec("Teaching Experience", expHtml)}
+          ${profile ? sec("Professional profile", `<div class="prof">${esc(profile)}</div>`) : ""}
+          ${sec("Professional experience", expHtml)}
           ${sec("References", `<div class="prof">Available on request via rTriibe.</div>`)}
         </div>
       </div>
@@ -1279,13 +1284,16 @@ function AttachFiles({ candidates, people, onDone }) {
     if (!hadText) return { c: null, hadText: false };
     const low = text.toLowerCase();
     const emails = low.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g) || [];
+    const foundEmail = emails[0] || "";
+    const firstLines = text.split(/\r?\n/).map((x) => x.trim()).filter(Boolean).slice(0, 6);
+    const foundName = firstLines.find((l) => { const w = l.split(/\s+/); return w.length >= 2 && w.length <= 4 && /^[A-Za-z][A-Za-z.'-]+(\s+[A-Za-z][A-Za-z.'-]+){1,3}$/.test(l); }) || "";
     for (const em of emails) { const hit = candidates.find((c) => c.email && c.email.toLowerCase().trim() === em); if (hit) return { c: hit, how: "email", hadText: true }; }
     const dd = digits(text);
     if (dd.length >= 9) { const hit = candidates.find((c) => { const cd = digits(c.phone); return cd.length >= 9 && dd.includes(cd.slice(-9)); }); if (hit) return { c: hit, how: "phone", hadText: true }; }
     const flat = " " + norm(text) + " ";
     const byName = candidates.filter((c) => { const t = nameTokens(c.name); return t.length >= 2 && flat.includes(" " + t[0] + " ") && flat.includes(" " + t[t.length - 1] + " "); });
     if (byName.length === 1) return { c: byName[0], how: "name in file", hadText: true };
-    return { c: null, hadText: true };
+    return { c: null, hadText: true, foundName, foundEmail };
   };
 
   const store = async (candidate, file) => {
@@ -1308,12 +1316,12 @@ function AttachFiles({ candidates, people, onDone }) {
       if (seenNames.has(file.name)) { dupL.push({ name: file.name, candidate: "", reason: "same file twice in this batch" }); }
       else {
         seenNames.add(file.name);
-        let match = matchByName(file.name); let how = "filename"; let reason = "";
-        if (!match) { const bc = await matchByContent(file); if (bc.c) { match = bc.c; how = bc.how; } else { reason = bc.hadText ? "text read, no matching record" : "no readable text (maybe scanned)"; } }
+        let match = matchByName(file.name); let how = "filename"; let reason = ""; let found = null;
+        if (!match) { const bc = await matchByContent(file); if (bc.c) { match = bc.c; how = bc.how; } else { reason = bc.hadText ? "text read, no matching record" : "no readable text (maybe scanned)"; found = (bc.foundName || bc.foundEmail) ? { name: bc.foundName, email: bc.foundEmail } : null; } }
         if (match) {
           if (match.cv_url || attachedIds.has(match.id)) { dupL.push({ name: file.name, candidate: match.name, reason: match.cv_url ? "candidate already has a CV" : "another file already matched this candidate" }); }
           else { try { await store(match, file); attachedIds.add(match.id); doneL.push({ name: file.name, candidate: match.name, how }); } catch (e) { pendL.push({ file, name: file.name, reason: "upload error — " + (e.message || e) }); } }
-        } else pendL.push({ file, name: file.name, reason });
+        } else pendL.push({ file, name: file.name, reason, found });
       }
       setProgress({ i: i + 1, total: arr.length });
       if (i % 8 === 0) { setDone([...doneL]); setDupes([...dupL]); setPending([...pendL]); await new Promise((r) => setTimeout(r, 0)); }
@@ -1354,7 +1362,7 @@ function AttachFiles({ candidates, people, onDone }) {
 
       {pending.length > 0 && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Couldn't identify — assign manually</h2><span className="x-pmeta">{pending.length} left</span></div>
         {pending.slice(0, 80).map((item, i) => <div key={i} className="x-assignrow">
-          <div className="x-assignname">{item.name}{item.reason ? <span className="mut" style={{ fontWeight: 400 }}> · {item.reason}</span> : ""}</div>
+          <div className="x-assignname">{item.found && (item.found.name || item.found.email) ? <span>{item.found.name || item.found.email}<span className="mut" style={{ fontWeight: 400 }}> · from {item.name}{item.reason ? " · " + item.reason : ""}</span></span> : <span>{item.name}{item.reason ? <span className="mut" style={{ fontWeight: 400 }}> · {item.reason}</span> : ""}</span>}</div>
           <div className="x-assignpick"><PersonField value="" people={people} onPick={(p) => { if (p.id) assign(item, p.id); }} /></div>
         </div>)}
         {pending.length > 80 && <div className="x-empty">+ {pending.length - 80} more — assign these first, they clear as you go</div>}

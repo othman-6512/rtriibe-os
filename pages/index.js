@@ -4,7 +4,7 @@ import {
   Wallet, Search, Plus, Bell, Download, ChevronRight, ChevronDown, X,
   Mail, Pencil, Check, Trash2, MapPin, Users, Briefcase, CreditCard,
   StickyNote, ArrowLeft, ShieldAlert, CheckCircle2, Sparkles, Star, Clock,
-  Receipt, AlertTriangle, Calendar, FileText,
+  Receipt, AlertTriangle, Calendar, FileText, MessageCircle,
 } from "lucide-react";
 import { supabase, hasSupabase } from "../lib/supabaseClient";
 import { DOC_TYPES } from "../lib/compliance";
@@ -675,7 +675,7 @@ function TeacherProfile({ t, docs, onBack, onSave, onDelete, onRefreshDocs }) {
           <div key={type} className="x-docrow"><div className="x-docname">{items.length ? <CheckCircle2 size={15} color={C.green} /> : <ShieldAlert size={15} color={C.faint} />} {type}{items.length > 1 ? " (" + items.length + ")" : ""}</div>{items.length ? <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>{items.map((r) => <button key={r.id} className="x-ghost sm" onClick={() => window.open(r.file_url, "_blank")}><Download size={13} /> {r.file_name}</button>)}</div> : <span className="x-docmiss">Missing</span>}</div>
         ); })}</div>
       </div>
-      <div className="x-profactions"><button className="x-ghost" onClick={() => d.cv_url ? window.open(d.cv_url, "_blank") : alert("No file stored for this candidate yet. Use 'Upload original file' to store one.")}><Download size={15} /> Download CV</button><label className="x-ghost" style={{ cursor: "pointer" }}><UploadCloud size={15} /> {cvBusy ? "Uploading…" : "Upload original file"}<input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: "none" }} disabled={cvBusy} onChange={(e) => { const f = e.target.files[0]; if (f) uploadOriginal(f); e.target.value = ""; }} /></label><button className="x-ghost"><Briefcase size={15} /> Match to vacancy</button><button className="x-ghost" style={{ marginLeft: "auto", color: C.red }} onClick={onDelete}><Trash2 size={15} /> Delete candidate</button></div>
+      <div className="x-profactions"><button className="x-ghost" onClick={() => d.cv_url ? window.open(d.cv_url, "_blank") : alert("No file stored for this candidate yet. Use 'Upload original file' to store one.")}><Download size={15} /> Download CV</button><label className="x-ghost" style={{ cursor: "pointer" }}><UploadCloud size={15} /> {cvBusy ? "Uploading…" : "Upload original file"}<input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: "none" }} disabled={cvBusy} onChange={(e) => { const f = e.target.files[0]; if (f) uploadOriginal(f); e.target.value = ""; }} /></label><button className="x-ghost" onClick={() => { const n = waNumber(d.phone); if (!n) { alert("No phone number saved for this candidate."); return; } window.open("https://wa.me/" + n, "_blank"); }}><MessageCircle size={15} /> WhatsApp</button><button className="x-ghost"><Briefcase size={15} /> Match to vacancy</button><button className="x-ghost" style={{ marginLeft: "auto", color: C.red }} onClick={onDelete}><Trash2 size={15} /> Delete candidate</button></div>
     </div>
   );
 }
@@ -1240,6 +1240,7 @@ async function extractFileText(file) {
   return "";
 }
 const digits = (s) => String(s || "").replace(/\D/g, "");
+const waNumber = (phone) => { let n = digits(phone); if (!n) return ""; if (n.startsWith("00")) n = n.slice(2); else if (n.startsWith("0")) n = "971" + n.slice(1); return n; };
 function AttachFiles({ candidates, people, onDone }) {
   const [pending, setPending] = useState([]);
   const [done, setDone] = useState([]);
@@ -1298,7 +1299,7 @@ function AttachFiles({ candidates, people, onDone }) {
         if (!match) { const bc = await matchByContent(file); if (bc.c) { match = bc.c; how = bc.how; } else { reason = bc.hadText ? "text read, no matching record" : "no readable text (maybe scanned)"; } }
         if (match) {
           if (match.cv_url || attachedIds.has(match.id)) { dupL.push({ name: file.name, candidate: match.name, reason: match.cv_url ? "candidate already has a CV" : "another file already matched this candidate" }); }
-          else { try { await store(match, file); attachedIds.add(match.id); doneL.push({ name: file.name, candidate: match.name, how }); } catch (e) { pendL.push({ file, name: file.name, reason: "upload error" }); } }
+          else { try { await store(match, file); attachedIds.add(match.id); doneL.push({ name: file.name, candidate: match.name, how }); } catch (e) { pendL.push({ file, name: file.name, reason: "upload error — " + (e.message || e) }); } }
         } else pendL.push({ file, name: file.name, reason });
       }
       setProgress({ i: i + 1, total: arr.length });

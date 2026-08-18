@@ -331,8 +331,8 @@ export default function Page() {
           {!hasSupabase && <div className="x-page"><div className="x-notice">Database not connected. Add <b>NEXT_PUBLIC_SUPABASE_URL</b> and <b>NEXT_PUBLIC_SUPABASE_ANON_KEY</b> in Vercel, then redeploy.</div></div>}
 
           {view === "dashboard" && <Dashboard go={openLeaf} teachers={teachers} lsas={lsas} vacancies={vacancies} tasks={tasks} pipeline={pipeline} />}
-          {view === "extract" && <Extract teachersCount={teachers.length} existing={[...teachers.map((t) => t.name), ...lsas.map((l) => l.name)]} onSaved={loadAll} />}
-          {view === "lsa-add" && <Extract lsaMode teachersCount={teachers.length} existing={[...teachers.map((t) => t.name), ...lsas.map((l) => l.name)]} onSaved={loadAll} />}
+          {view === "extract" && <Extract teachersCount={teachers.length} existing={[...teachers.map((t) => t.name), ...lsas.map((l) => l.name)]} existingRecords={[...teachers.map((t) => ({ name: t.name, email: t.email })), ...lsas.map((l) => ({ name: l.name, email: l.email }))]} onSaved={loadAll} />}
+          {view === "lsa-add" && <Extract lsaMode teachersCount={teachers.length} existing={[...teachers.map((t) => t.name), ...lsas.map((l) => l.name)]} existingRecords={[...teachers.map((t) => ({ name: t.name, email: t.email })), ...lsas.map((l) => ({ name: l.name, email: l.email }))]} onSaved={loadAll} />}
 
           {view === "t-database" && !selT && <TeacherDB teachers={teachers} onSelect={setSelT} onAdd={(r) => insertRow("candidates", r)} onDel={(id) => deleteRow("candidates", id)} />}
           {view === "t-database" && selT && <TeacherProfile t={teachers.find((x) => x.id === selT)} docs={compliance.filter((x) => x.candidate_id === selT)} onBack={() => setSelT(null)} onSave={(p) => updateRow("candidates", selT, p)} onDelete={() => { if (confirm("Delete this candidate permanently?")) { deleteRow("candidates", selT); setSelT(null); } }} onRefreshDocs={() => reloadTable("compliance_docs")} />}
@@ -389,7 +389,7 @@ function Dashboard({ go, teachers, lsas, vacancies, tasks, pipeline }) {
 }
 
 /* ============================ EXTRACT ============================ */
-function Extract({ lsaMode, teachersCount, existing, onSaved }) {
+function Extract({ lsaMode, teachersCount, existing, existingRecords, onSaved }) {
   const [route, setRoute] = useState(lsaMode ? "lsa" : "auto");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -490,6 +490,19 @@ function Extract({ lsaMode, teachersCount, existing, onSaved }) {
       setMsg(`Processing ${i + 1} of ${arr.length}…`);
       const clean = arr[i].name.replace(/\.[^.]+$/, "").replace(/[_\-]+/g, " ").toLowerCase();
       if (known.some((nm) => clean.includes(nm) || nm.split(" ").filter((w) => w.length > 2).every((w) => clean.includes(w)))) { setRes((x) => ({ ...x, dupe: x.dupe + 1, done: x.done + 1 })); continue; }
+      const ftext = await getPdfText(arr[i]);
+      if (ftext) {
+        const de = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        const low = de(ftext);
+        const emailsIn = low.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g) || [];
+        const flat = " " + low.replace(/[^a-z0-9]+/g, " ") + " ";
+        const dup = (existingRecords || []).some((r) => {
+          if (r.email && emailsIn.includes(r.email.toLowerCase().trim())) return true;
+          const t = de(r.name).replace(/[^a-z0-9]+/g, " ").split(" ").filter((w) => w.length >= 2);
+          return t.length >= 2 && flat.includes(" " + t[0] + " ") && flat.includes(" " + t[t.length - 1] + " ");
+        });
+        if (dup) { setRes((x) => ({ ...x, dupe: x.dupe + 1, done: x.done + 1 })); continue; }
+      }
       try { const body = await fileToBody(arr[i]); const parsed = await runOne({ ...body, model: "haiku" }); const kind = await saveResult(parsed, n, arr[i]); if (kind === "teacher") n++; setRes((x) => ({ ...x, [kind]: x[kind] + 1, done: x.done + 1 })); }
       catch (e) { setRes((x) => ({ ...x, failed: x.failed + 1, done: x.done + 1 })); }
       await new Promise((r) => setTimeout(r, 600));

@@ -332,3 +332,7 @@ textarea.x-input { resize: vertical; }
 .x-tsrow { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .x-tsrow .x-formlabel { display: flex; flex-direction: column; gap: 4px; }
 .x-tspick { border-top: 1px solid #F1F2F5; padding-top: 12px; max-height: 220px; overflow: auto; }
+
+/* clickable rows */
+.x-clickrow { cursor: pointer; }
+.x-clickrow:hover td { background: #F6F7F9; }

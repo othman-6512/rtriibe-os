@@ -197,7 +197,18 @@ export default function Page() {
   useEffect(() => { try { if (localStorage.getItem("rt_auth") === "1") setAuthed(true); } catch {} setReady(true); }, []);
 
   const setters = { candidates: setTeachers, lsas: setLsas, vacancies: setVacancies, pipeline: setPipeline, schools: setSchools, tasks: setTasks, bookings: setBookings, attendance: setAttendance, submissions: setSubmissions, covers: setCovers, invoices: setInvoices, compliance_docs: setCompliance };
-  const reloadTable = async (t) => { if (!supabase) return; const { data } = await supabase.from(t).select("*").order("created_at", { ascending: false }).range(0, 99999); setters[t](data || []); };
+  const reloadTable = async (t) => {
+    if (!supabase) return;
+    let all = []; let from = 0; const step = 1000;
+    while (true) {
+      const { data, error } = await supabase.from(t).select("*").order("created_at", { ascending: false }).range(from, from + step - 1);
+      if (error || !data || !data.length) break;
+      all = all.concat(data);
+      if (data.length < step) break;
+      from += step;
+    }
+    setters[t](all);
+  };
   const loadAll = async () => { if (!supabase) return; await Promise.all(Object.keys(setters).map(reloadTable)); };
   useEffect(() => { if (authed) loadAll(); }, [authed]);
 
@@ -238,10 +249,11 @@ export default function Page() {
 
   const createInvoice = async (inv) => {
     if (!supabase) return;
-    const { error } = await supabase.from("invoices").insert({ kind: inv.kind || "Teacher", client: inv.client || "", candidate_name: inv.candidate_name || "", candidate_id: inv.candidate_id || null, description: inv.description || "", amount: Number(inv.amount) || 0, paid: false, status: "Unpaid" });
+    const kind = inv.kind || "Permanent";
+    const { error } = await supabase.from("invoices").insert({ kind, client: inv.client || "", candidate_name: inv.candidate_name || "", candidate_id: inv.candidate_id || null, description: inv.description || "", amount: Number(inv.amount) || 0, contact: inv.contact || "", reference: inv.reference || "", paid: false, status: "Unpaid" });
     if (error) { alert("Add failed: " + error.message); return; }
-    if (inv.candidate_id) {
-      if ((inv.kind || "Teacher") === "LSA") await supabase.from("lsas").update({ status: "Placed" }).eq("id", inv.candidate_id);
+    if (inv.candidate_id && kind !== "Cover") {
+      if (kind === "LSA") await supabase.from("lsas").update({ status: "Placed" }).eq("id", inv.candidate_id);
       else { await supabase.from("candidates").update({ status: "Placed" }).eq("id", inv.candidate_id); await supabase.from("pipeline").update({ stage: "Placed" }).eq("candidate_id", inv.candidate_id); }
     }
     reloadTable("invoices"); reloadTable("candidates"); reloadTable("lsas"); reloadTable("pipeline");
@@ -336,7 +348,7 @@ export default function Page() {
 
           {view === "t-database" && !selT && <TeacherDB teachers={teachers} onSelect={setSelT} onAdd={(r) => insertRow("candidates", r)} onDel={(id) => deleteRow("candidates", id)} />}
           {view === "t-database" && selT && <TeacherProfile t={teachers.find((x) => x.id === selT)} docs={compliance.filter((x) => x.candidate_id === selT)} onBack={() => setSelT(null)} onSave={(p) => updateRow("candidates", selT, p)} onDelete={() => { if (confirm("Delete this candidate permanently?")) { deleteRow("candidates", selT); setSelT(null); } }} onRefreshDocs={() => reloadTable("compliance_docs")} />}
-          {view === "finance" && <Finance invoices={invoices} people={allPeople} onCreate={createInvoice} onUpdate={(id, p) => updateRow("invoices", id, p)} onDel={(id) => deleteRow("invoices", id)} />}
+          {view === "finance" && <Finance invoices={invoices} covers={covers} people={allPeople} onCreate={createInvoice} onUpdate={(id, p) => updateRow("invoices", id, p)} onDel={(id) => deleteRow("invoices", id)} />}
 
           {view === "t-vacancies" && !selV && <Vacancies rows={vacancies} onOpen={setSelV} onAdd={(r) => insertRow("vacancies", r)} onUpdate={(id, p) => updateRow("vacancies", id, p)} onDel={(id) => deleteRow("vacancies", id)} onImport={(rows) => importRows("vacancies", rows)} />}
           {view === "t-vacancies" && selV && <VacancyDetail vacancy={vacancies.find((v) => v.id === selV)} candidates={teachers} subs={submissions.filter((s) => s.vacancy_id === selV)} onBack={() => setSelV(null)} onAddSub={addSubmission} onUpdateSub={updateSubmission} onDelSub={delSubmission} />}
@@ -1022,41 +1034,102 @@ function Simple({ title, sub }) { return <div className="x-page"><h1 className="
 /* ============================ COVERS ============================ */
 const COVER_BASE = [
   { key: "school", label: "School" }, { key: "start_date", label: "Start date", type: "date" }, { key: "end_date", label: "End date", type: "date" },
-  { key: "day_rate", label: "Weekday rate (AED)", type: "number" }, { key: "friday_rate", label: "Friday rate (AED)", type: "number" },
+  { key: "day_rate", label: "Candidate weekday pay (AED)", type: "number" }, { key: "friday_rate", label: "Candidate Friday pay (AED)", type: "number" },
+  { key: "school_day_rate", label: "School weekday charge (AED)", type: "number" }, { key: "school_friday_rate", label: "School Friday charge (AED)", type: "number" },
   { key: "status", label: "Status", type: "select", opts: ["Active", "Ended"] },
 ];
+const dayFactor = (d) => (d.portion === "Half" ? 0.5 : 1);
+const candDayPay = (c, d) => (d.type === "Friday" ? Number(c.friday_rate || 0) : Number(c.day_rate || 0)) * dayFactor(d);
+const schoolDayCharge = (c, d) => (d.type === "Friday" ? Number(c.school_friday_rate || 0) : Number(c.school_day_rate || 0)) * dayFactor(d);
+const coverDays = (c) => (Array.isArray(c.days) ? c.days : []);
+const candPay = (c) => coverDays(c).reduce((s, d) => s + candDayPay(c, d), 0);
+const schoolCharge = (c) => coverDays(c).reduce((s, d) => s + schoolDayCharge(c, d), 0);
+
+function generateTimesheet(covers, fromD, toD) {
+  const esc = (s) => String(s || "").replace(/</g, "");
+  const money = (n) => new Intl.NumberFormat("en-AE", { minimumFractionDigits: 2 }).format(n);
+  const inRange = (dt) => (!fromD || dt >= fromD) && (!toD || dt <= toD);
+  let rowsHtml = ""; let tPay = 0; let tCharge = 0; let any = false;
+  covers.forEach((c) => {
+    const ds = coverDays(c).filter((d) => inRange(d.date)).sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (!ds.length) return;
+    any = true;
+    let cPay = 0; let cCharge = 0;
+    const lines = ds.map((d) => { const p = candDayPay(c, d); const ch = schoolDayCharge(c, d); cPay += p; cCharge += ch; return `<tr><td>${esc(d.date)}</td><td>${d.type}${d.portion === "Half" ? " (half)" : ""}</td><td class="r">${money(p)}</td><td class="r">${money(ch)}</td></tr>`; }).join("");
+    tPay += cPay; tCharge += cCharge;
+    rowsHtml += `<div class="cand"><div class="candh">${esc(c.teacher_name || "Candidate")} <span>${esc(c.school || "")}</span></div><table><thead><tr><th>Date</th><th>Session</th><th class="r">Candidate pay</th><th class="r">School charge</th></tr></thead><tbody>${lines}<tr class="sub"><td colspan="2">Subtotal — ${ds.length} day(s)</td><td class="r">AED ${money(cPay)}</td><td class="r">AED ${money(cCharge)}</td></tr></tbody></table></div>`;
+  });
+  if (!any) { alert("No logged days fall in that date range."); return; }
+  const period = (fromD || "start") + "  to  " + (toD || "today");
+  const w = window.open("", "_blank");
+  if (!w) { alert("Please allow pop-ups so the timesheet can open."); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Timesheet</title><style>
+    *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}body{margin:0;padding:40px;color:#1C2230}
+    .bar{display:flex;gap:10px;margin-bottom:20px}.btn{padding:11px 20px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}.btn.red{background:#DA2A34;color:#fff}.btn.grey{background:#EEF0F4;color:#1C2230}
+    .top{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #DA2A34;padding-bottom:16px}
+    .brand{font-size:26px;font-weight:800}.brand span{color:#DA2A34}.brand small{display:block;font-size:10px;font-weight:600;color:#7A8494;letter-spacing:2px;margin-top:2px}
+    h1{font-size:20px;margin:0}.per{font-size:12px;color:#666;text-align:right}
+    .cand{margin-top:24px;page-break-inside:avoid}.candh{font-size:14px;font-weight:700;margin-bottom:6px}.candh span{font-weight:400;color:#777;font-size:12px}
+    table{width:100%;border-collapse:collapse}th{background:#1C2230;color:#fff;text-align:left;padding:9px 11px;font-size:11px}th.r,td.r{text-align:right}
+    td{padding:8px 11px;border-bottom:1px solid #eee;font-size:12px}.sub td{font-weight:700;background:#F6F7F9;border-bottom:none}
+    .grand{margin-top:26px;border-top:2px solid #1C2230;padding-top:12px;display:flex;justify-content:flex-end;gap:40px;font-size:14px;font-weight:800}
+    .grand .p{color:#1C2230}.grand .c{color:#DA2A34}
+    .foot{margin-top:30px;border-top:1px solid #eee;padding-top:12px;font-size:10px;color:#888}
+    @media print{.bar{display:none}}
+  </style></head><body>
+    <div class="bar"><button class="btn red" onclick="window.print()">Download / Print PDF</button><button class="btn grey" onclick="window.close()">&larr; Close</button></div>
+    <div class="top"><div class="brand"><span>r</span>Triibe<small>FZCO &middot; SUPPLY TIMESHEET</small></div><div><h1>Cover timesheet</h1><div class="per">Period: ${esc(period)}</div></div></div>
+    ${rowsHtml}
+    <div class="grand"><span class="p">Total candidate pay: AED ${money(tPay)}</span><span class="c">Total school charge: AED ${money(tCharge)}</span></div>
+    <div class="foot">rTriibe FZCO &middot; TRN 100452871500003</div>
+  </body></html>`);
+  w.document.close();
+}
+
 function Covers({ rows, people, onAdd, onUpdate, onDel }) {
   const [modal, setModal] = useState(false);
   const [openC, setOpenC] = useState(null);
-  const [day, setDay] = useState({ date: "", type: "Weekday" });
+  const [day, setDay] = useState({ date: "", type: "Weekday", portion: "Full" });
+  const [ts, setTs] = useState({ open: false, from: "", to: "", picked: {} });
   const fields = [{ key: "teacher_name", label: "Teacher", type: "person" }, ...COVER_BASE];
-  const payOf = (c) => (Array.isArray(c.days) ? c.days : []).reduce((p, d) => p + (d.type === "Friday" ? Number(c.friday_rate || 0) : Number(c.day_rate || 0)), 0);
   const cover = openC ? rows.find((r) => r.id === openC.id) : null;
-  const days = cover && Array.isArray(cover.days) ? cover.days : [];
-  const addDay = () => { if (!cover || !day.date) return; onUpdate(cover.id, { days: [...days, { id: Date.now(), date: day.date, type: day.type }] }); setDay({ date: "", type: "Weekday" }); };
+  const days = cover ? coverDays(cover) : [];
+  const addDay = () => { if (!cover || !day.date) return; onUpdate(cover.id, { days: [...days, { id: Date.now(), date: day.date, type: day.type, portion: day.portion }] }); setDay({ date: "", type: "Weekday", portion: "Full" }); };
   const delDay = (id) => onUpdate(cover.id, { days: days.filter((d) => d.id !== id) });
+  const toggle = (id) => setTs((t) => ({ ...t, picked: { ...t.picked, [id]: !t.picked[id] } }));
+  const runTs = () => { const chosen = rows.filter((c) => ts.picked[c.id]); generateTimesheet(chosen.length ? chosen : rows, ts.from, ts.to); };
   return (
     <div className="x-page">
-      <div className="x-headrow"><div><h1 className="x-h1">Covers</h1><p className="x-sub">Teacher supply / cover bookings with attendance and pay.</p></div><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New cover</button></div>
+      <div className="x-headrow"><div><h1 className="x-h1">Covers</h1><p className="x-sub">Supply bookings with candidate pay, school charge and attendance.</p></div><div style={{ display: "flex", gap: 8 }}><button className="x-ghost" onClick={() => setTs((t) => ({ ...t, open: !t.open }))}><Download size={14} /> Timesheet</button><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New cover</button></div></div>
+      {ts.open && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Download timesheet PDF</h2></div>
+        <div className="x-tsrow"><label className="x-formlabel">From<input className="x-input" type="date" value={ts.from} onChange={(e) => setTs({ ...ts, from: e.target.value })} /></label><label className="x-formlabel">To<input className="x-input" type="date" value={ts.to} onChange={(e) => setTs({ ...ts, to: e.target.value })} /></label><button className="x-primary" onClick={runTs}><Download size={14} /> Generate</button></div>
+        <div className="x-tspick"><div className="x-pmeta" style={{ marginBottom: 6 }}>Pick candidates (none selected = all):</div>{rows.map((c) => <label key={c.id} className="x-cbrow"><input type="checkbox" checked={!!ts.picked[c.id]} onChange={() => toggle(c.id)} /> {c.teacher_name} · {c.school || "—"}</label>)}</div>
+      </div>}
       {rows.length === 0 ? <div className="x-panel"><div className="x-empty">No covers yet. Press New cover.</div></div> : (
-        <div className="x-tablewrap"><table className="x-table"><thead><tr><th>Teacher</th><th>School</th><th>Dates</th><th className="r">Days</th><th className="r">Pay</th><th>Status</th><th></th></tr></thead>
-          <tbody>{rows.map((c) => <tr key={c.id}>
+        <div className="x-tablewrap"><table className="x-table"><thead><tr><th>Teacher</th><th>School</th><th>Dates</th><th className="r">Days</th><th className="r">Candidate pay</th><th className="r">School charge</th><th className="r">Margin</th><th>Status</th><th></th></tr></thead>
+          <tbody>{rows.map((c) => { const pay = candPay(c); const ch = schoolCharge(c); return (<tr key={c.id}>
             <td className="b">{c.teacher_name}</td><td>{c.school || "—"}</td>
             <td className="mut nums">{(c.start_date || "?") + " → " + (c.end_date || "?")}</td>
-            <td className="r nums">{(Array.isArray(c.days) ? c.days : []).length}</td>
-            <td className="r nums">AED {fmt(payOf(c))}</td>
+            <td className="r nums">{coverDays(c).length}</td>
+            <td className="r nums">AED {fmt(pay)}</td>
+            <td className="r nums">AED {fmt(ch)}</td>
+            <td className="r nums b" style={{ color: ch - pay >= 0 ? C.green : C.red }}>AED {fmt(ch - pay)}</td>
             <td><Pill s={c.status} /></td>
             <td className="rowact"><button className="x-ghost" style={{ padding: "5px 9px" }} onClick={() => setOpenC(c)}><Calendar size={13} /> Attendance</button><button className="x-ic" onClick={() => onDel(c.id)}><Trash2 size={13} /></button></td>
-          </tr>)}</tbody>
+          </tr>); })}</tbody>
         </table></div>
       )}
       {modal && <FormModal title="New cover" fields={fields} people={people} initial={{ status: "Active" }} onClose={() => setModal(false)} onSave={(d) => { onAdd({ ...d, days: [] }); setModal(false); }} />}
       {cover && <><div className="x-scrim" onClick={() => setOpenC(null)} /><div className="x-modal lg">
         <div className="x-modalhead"><h2 className="x-h2">{cover.teacher_name} · {cover.school}</h2><button className="x-ic" onClick={() => setOpenC(null)}><X size={16} /></button></div>
-        <div className="x-calcbig"><div><div className="x-calclabel">Days worked</div><div className="x-calcv nums">{days.length}</div></div><div className="x-calceq">=</div><div><div className="x-calclabel">Total pay</div><div className="x-calcv nums red">AED {fmt(payOf(cover))}</div></div></div>
-        <div className="x-payadd"><input className="x-input" type="date" value={day.date} onChange={(e) => setDay({ ...day, date: e.target.value })} /><select className="x-input" value={day.type} onChange={(e) => setDay({ ...day, type: e.target.value })}><option>Weekday</option><option>Friday</option></select><button className="x-primary sm" onClick={addDay}><Plus size={14} /></button></div>
+        <div className="x-stats" style={{ gridTemplateColumns: "repeat(3,1fr)", marginBottom: 14 }}>
+          <div className="x-stat"><span className="x-statbar" style={{ background: C.blue }} /><div className="x-statv nums">{days.length}</div><div className="x-statl">Days</div></div>
+          <div className="x-stat"><span className="x-statbar" style={{ background: C.amber }} /><div className="x-statv nums">AED {fmt(candPay(cover))}</div><div className="x-statl">Candidate pay</div></div>
+          <div className="x-stat"><span className="x-statbar" style={{ background: C.green }} /><div className="x-statv nums">AED {fmt(schoolCharge(cover))}</div><div className="x-statl">School charge</div></div>
+        </div>
+        <div className="x-payadd"><input className="x-input" type="date" value={day.date} onChange={(e) => setDay({ ...day, date: e.target.value })} /><select className="x-input" value={day.type} onChange={(e) => setDay({ ...day, type: e.target.value })}><option>Weekday</option><option>Friday</option></select><select className="x-input" value={day.portion} onChange={(e) => setDay({ ...day, portion: e.target.value })}><option>Full</option><option>Half</option></select><button className="x-primary sm" onClick={addDay}><Plus size={14} /></button></div>
         {days.length === 0 && <div className="x-empty">No days logged.</div>}
-        {days.map((d) => <div key={d.id} className="x-payrow"><div><div className="x-notet nums">{d.date}</div><div className="x-paymeta">{d.type} · AED {fmt(d.type === "Friday" ? cover.friday_rate : cover.day_rate)}</div></div><button className="x-ic" onClick={() => delDay(d.id)}><Trash2 size={13} /></button></div>)}
+        {days.map((d) => <div key={d.id} className="x-payrow"><div><div className="x-notet nums">{d.date}</div><div className="x-paymeta">{d.type}{d.portion === "Half" ? " · half day" : " · full day"} · pay AED {fmt(candDayPay(cover, d))} · charge AED {fmt(schoolDayCharge(cover, d))}</div></div><button className="x-ic" onClick={() => delDay(d.id)}><Trash2 size={13} /></button></div>)}
       </div></>}
     </div>
   );
@@ -1156,9 +1229,13 @@ function openInvoice(inv) {
   const total = fee + vat;
   const client = inv.client || inv.school || "Client";
   const desc = inv.description || inv.role || "Placement";
-  const contact = inv.candidate_name || inv.contact || "";
+  const contact = inv.contact || "";
+  const reference = inv.reference || "";
+  const candidate = inv.candidate_name || "";
   const num = "INV-" + String(Date.now()).slice(-6);
-  const date = new Date().toLocaleDateString("en-GB");
+  const now = new Date();
+  const date = now.toLocaleDateString("en-GB");
+  const due = new Date(now.getTime() + 30 * 864e5).toLocaleDateString("en-GB");
   const money = (n) => "AED " + new Intl.NumberFormat("en-AE", { minimumFractionDigits: 2 }).format(n);
   const esc = (s) => String(s || "").replace(/</g, "");
   const w = window.open("", "_blank");
@@ -1189,24 +1266,47 @@ function openInvoice(inv) {
   </style></head><body>
     <div class="bar"><button class="btn red" onclick="window.print()">Download / Print PDF</button><button class="btn grey" onclick="window.close()">&larr; Close</button></div>
     <div class="top"><div class="brand"><span>r</span>Triibe<small>FZCO &middot; EDUCATION RECRUITMENT</small></div>
-    <div><h1>INVOICE</h1><div class="meta">Invoice no: <b>${num}</b><br>Date: ${date}<br>TRN: 100452871500003</div></div></div>
+    <div><h1>INVOICE</h1><div class="meta">Invoice no: <b>${num}</b><br>Date: ${date}<br>Due: ${due}<br>TRN: 100452871500003${reference ? "<br>Ref: " + esc(reference) : ""}</div></div></div>
     <div class="parties"><div><div class="lbl">From</div><b>rTriibe FZCO</b><br>Dubai, United Arab Emirates<br>TRN 100452871500003</div>
-    <div style="text-align:right"><div class="lbl">Bill to</div><b>${esc(client)}</b><br>${esc(contact)}</div></div>
+    <div style="text-align:right"><div class="lbl">Bill to</div><b>${esc(client)}</b>${contact ? "<br>Attn: " + esc(contact) : ""}</div></div>
     <table><thead><tr><th>Description</th><th class="r">Amount</th></tr></thead>
-    <tbody><tr><td>${esc(desc)}</td><td class="r">${money(fee)}</td></tr></tbody></table>
+    <tbody><tr><td>${esc(desc)}${candidate ? " — " + esc(candidate) : ""}</td><td class="r">${money(fee)}</td></tr></tbody></table>
     <div class="totals"><div><span>Subtotal</span><span>${money(fee)}</span></div><div><span>VAT (5%)</span><span>${money(vat)}</span></div><div class="grand"><span>Total due</span><span>${money(total)}</span></div></div>
     <div class="foot">Payment terms: 30 days from invoice date. Please quote the invoice number as your payment reference.<br>Bank details: [add your rTriibe FZCO bank account here].<br>Thank you for working with rTriibe.</div>
   </body></html>`);
   w.document.close();
 }
-const INV_FIELDS = [
-  { key: "kind", label: "Type", type: "select", opts: ["Teacher", "LSA"] },
-  { key: "candidate_name", label: "Candidate", type: "person", idKey: "candidate_id" },
-  { key: "client", label: "Bill to (school / family)" },
-  { key: "description", label: "Description" },
-  { key: "amount", label: "Amount (AED)", type: "number" },
-];
-function Finance({ invoices, people, onCreate, onUpdate, onDel }) {
+function InvoiceModal({ covers, people, onClose, onSave }) {
+  const [d, setD] = useState({ kind: "Permanent", candidate_name: "", candidate_id: null, client: "", contact: "", description: "", amount: "", reference: "", cover_id: "" });
+  const set = (k, v) => setD((x) => ({ ...x, [k]: v }));
+  const pickCover = (id) => {
+    const c = (covers || []).find((x) => x.id === id);
+    if (!c) { set("cover_id", ""); return; }
+    setD((x) => ({ ...x, cover_id: id, client: c.school || "", candidate_name: c.teacher_name || "", candidate_id: null, amount: schoolCharge(c) || "", description: "Supply cover — " + (c.school || "") }));
+  };
+  const pickPerson = (p) => setD((x) => ({ ...x, candidate_name: p.name || "", candidate_id: p.id || null }));
+  const isCover = d.kind === "Cover";
+  return (
+    <>
+      <div className="x-scrim" onClick={onClose} />
+      <div className="x-modal lg">
+        <div className="x-modalhead"><h2 className="x-h2">New invoice</h2><button className="x-ic" onClick={onClose}><X size={16} /></button></div>
+        <div className="x-formgrid">
+          <div className="x-formfield"><span className="x-formlabel">Type</span><select className="x-input" value={d.kind} onChange={(e) => set("kind", e.target.value)}><option>Permanent</option><option>LSA</option><option>Cover</option></select></div>
+          {isCover ? <div className="x-formfield"><span className="x-formlabel">Which cover</span><select className="x-input" value={d.cover_id} onChange={(e) => pickCover(e.target.value)}><option value="">Select a cover…</option>{(covers || []).map((c) => <option key={c.id} value={c.id}>{c.teacher_name} · {c.school} · AED {fmt(schoolCharge(c))}</option>)}</select></div>
+            : <div className="x-formfield"><span className="x-formlabel">Candidate</span><PersonField value={d.candidate_name} people={people} onPick={pickPerson} /></div>}
+          <div className="x-formfield"><span className="x-formlabel">Bill to (school / family)</span><input className="x-input" value={d.client} onChange={(e) => set("client", e.target.value)} /></div>
+          <div className="x-formfield"><span className="x-formlabel">Contact person</span><input className="x-input" value={d.contact} onChange={(e) => set("contact", e.target.value)} /></div>
+          <div className="x-formfield full"><span className="x-formlabel">Description</span><input className="x-input" value={d.description} onChange={(e) => set("description", e.target.value)} placeholder={d.kind === "Permanent" ? "Permanent placement fee" : d.kind === "LSA" ? "LSA placement fee" : "Supply cover"} /></div>
+          <div className="x-formfield"><span className="x-formlabel">Amount (AED){isCover ? " — school charge" : ""}</span><input className="x-input" type="number" value={d.amount} onChange={(e) => set("amount", e.target.value)} /></div>
+          <div className="x-formfield"><span className="x-formlabel">Reference / PO (optional)</span><input className="x-input" value={d.reference} onChange={(e) => set("reference", e.target.value)} /></div>
+        </div>
+        <div className="x-modalactions"><button className="x-ghost" onClick={onClose}>Cancel</button><button className="x-primary" onClick={() => onSave(d)}>Create invoice</button></div>
+      </div>
+    </>
+  );
+}
+function Finance({ invoices, covers, people, onCreate, onUpdate, onDel }) {
   const [modal, setModal] = useState(false);
   const rows = invoices || [];
   const amt = (i) => Number(i.amount || 0);
@@ -1215,19 +1315,20 @@ function Finance({ invoices, people, onCreate, onUpdate, onDel }) {
   const totalFees = rows.reduce((s, i) => s + amt(i), 0);
   const totalVat = rows.reduce((s, i) => s + vatOf(i), 0);
   const outstanding = rows.filter((i) => !i.paid).reduce((s, i) => s + totOf(i), 0);
+  const collected = rows.filter((i) => i.paid).reduce((s, i) => s + totOf(i), 0);
   return (
     <div className="x-page">
-      <div className="x-headrow"><div><h1 className="x-h1">Finance</h1><p className="x-sub">Invoices for teacher and LSA placements. Creating one marks the candidate Placed and syncs the pipeline.</p></div><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New invoice</button></div>
+      <div className="x-headrow"><div><h1 className="x-h1">Finance</h1><p className="x-sub">Invoices for permanent placements, LSAs and supply covers. Cover invoices bill the school rate. Placement invoices mark the candidate Placed and sync the pipeline.</p></div><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New invoice</button></div>
       <div className="x-stats">
-        <div className="x-stat"><span className="x-statbar" style={{ background: C.blue }} /><div className="x-statv nums">AED {fmt(Math.round(totalFees))}</div><div className="x-statl">Total fees</div></div>
+        <div className="x-stat"><span className="x-statbar" style={{ background: C.blue }} /><div className="x-statv nums">AED {fmt(Math.round(totalFees))}</div><div className="x-statl">Invoiced (excl VAT)</div></div>
         <div className="x-stat"><span className="x-statbar" style={{ background: C.amber }} /><div className="x-statv nums">AED {fmt(Math.round(totalVat))}</div><div className="x-statl">VAT (5%)</div></div>
-        <div className="x-stat"><span className="x-statbar" style={{ background: C.green }} /><div className="x-statv nums">AED {fmt(Math.round(totalFees + totalVat))}</div><div className="x-statl">Grand total</div></div>
+        <div className="x-stat"><span className="x-statbar" style={{ background: C.green }} /><div className="x-statv nums">AED {fmt(Math.round(collected))}</div><div className="x-statl">Collected</div></div>
         <div className="x-stat"><span className="x-statbar" style={{ background: C.red }} /><div className="x-statv nums">AED {fmt(Math.round(outstanding))}</div><div className="x-statl">Outstanding</div></div>
       </div>
       {rows.length === 0 ? <div className="x-panel"><div className="x-empty">No invoices yet. Press New invoice.</div></div> : (
         <div className="x-tablewrap"><table className="x-table"><thead><tr><th>Bill to</th><th>Candidate</th><th>Description</th><th className="r">Amount</th><th className="r">VAT 5%</th><th className="r">Total</th><th>Paid</th><th></th></tr></thead>
           <tbody>{rows.map((i) => { const pc = i.paid ? C.green : C.red; return (<tr key={i.id}>
-            <td className="b">{i.client || "—"}<span className="x-kindtag">{i.kind || "Teacher"}</span></td>
+            <td className="b">{i.client || "—"}<span className="x-kindtag">{i.kind || "Permanent"}</span></td>
             <td>{i.candidate_name || "—"}</td><td className="mut">{i.description || "—"}</td>
             <td className="r nums">{fmt(amt(i))}</td><td className="r nums">{fmt(vatOf(i))}</td><td className="r nums b">{fmt(totOf(i))}</td>
             <td><button className="x-pill" style={{ cursor: "pointer", color: pc, background: pc + "16", borderColor: pc + "30" }} onClick={() => onUpdate(i.id, { paid: !i.paid, status: !i.paid ? "Paid" : "Unpaid" })}>{i.paid ? "Paid" : "Unpaid"}</button></td>
@@ -1235,7 +1336,7 @@ function Finance({ invoices, people, onCreate, onUpdate, onDel }) {
           </tr>); })}</tbody>
         </table></div>
       )}
-      {modal && <FormModal title="New invoice" fields={INV_FIELDS} people={people} initial={{ kind: "Teacher" }} onClose={() => setModal(false)} onSave={(d) => { onCreate(d); setModal(false); }} />}
+      {modal && <InvoiceModal covers={covers} people={people} onClose={() => setModal(false)} onSave={(d) => { onCreate(d); setModal(false); }} />}
     </div>
   );
 }

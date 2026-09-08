@@ -269,12 +269,13 @@ export default function Page() {
   const notifCount = pendingTasks.length + agingVac.length + dueActions.length;
 
   const ql = gq.trim().toLowerCase();
+  const qd = digits(gq);
   const searchResults = ql ? [
-    ...teachers.filter((t) => ((t.name || "") + (t.ref || "") + (t.spec || "")).toLowerCase().includes(ql)).slice(0, 6).map((t) => ({ type: "Candidate", label: t.name, sub: (t.ref || "") + " · " + (t.spec || ""), tone: C.blue, go: () => { setSelL(null); setSelT(t.id); setView("t-database"); } })),
-    ...lsas.filter((l) => ((l.name || "") + (l.cert || "") + (l.langs || "")).toLowerCase().includes(ql)).slice(0, 6).map((l) => ({ type: "LSA", label: l.name, sub: l.cert || "", tone: C.green, go: () => { setSelT(null); setSelL(l.id); setView("lsa-directory"); } })),
-    ...vacancies.filter((v) => ((v.role || "") + (v.school || "") + (v.contact || "")).toLowerCase().includes(ql)).slice(0, 6).map((v) => ({ type: "Vacancy", label: v.role, sub: v.school || "", tone: C.red, go: () => setView("t-vacancies") })),
-    ...pipeline.filter((p) => ((p.candidate_name || "") + (p.school || "") + (p.role || "")).toLowerCase().includes(ql)).slice(0, 6).map((p) => ({ type: "Pipeline", label: p.candidate_name, sub: (p.school || "") + " · " + (p.stage || ""), tone: C.amber, go: () => setView("t-pipeline") })),
-    ...schools.filter((s) => ((s.name || "") + (s.grp || "")).toLowerCase().includes(ql)).slice(0, 4).map((s) => ({ type: "School", label: s.name, sub: s.grp || "", tone: C.muted, go: () => setView("schools-list") })),
+    ...teachers.filter((t) => searchHit(ql, qd, [t.name, t.ref, t.spec, t.email, t.phone, t.location, t.curriculum, t.qual], t.phone)).slice(0, 8).map((t) => ({ type: "Candidate", label: t.name, sub: [t.ref, t.spec, t.phone, t.email].filter(Boolean).join(" · "), tone: C.blue, go: () => { setSelL(null); setSelT(t.id); setView("t-database"); } })),
+    ...lsas.filter((l) => searchHit(ql, qd, [l.name, l.cert, l.langs, l.email, l.phone, l.location], l.phone)).slice(0, 8).map((l) => ({ type: "LSA", label: l.name, sub: [l.cert, l.phone, l.email].filter(Boolean).join(" · "), tone: C.green, go: () => { setSelT(null); setSelL(l.id); setView("lsa-directory"); } })),
+    ...vacancies.filter((v) => searchHit(ql, qd, [v.role, v.school, v.contact], null)).slice(0, 6).map((v) => ({ type: "Vacancy", label: v.role, sub: v.school || "", tone: C.red, go: () => setView("t-vacancies") })),
+    ...pipeline.filter((p) => searchHit(ql, qd, [p.candidate_name, p.school, p.role], null)).slice(0, 6).map((p) => ({ type: "Pipeline", label: p.candidate_name, sub: (p.school || "") + " · " + (p.stage || ""), tone: C.amber, go: () => setView("t-pipeline") })),
+    ...schools.filter((s) => searchHit(ql, qd, [s.name, s.grp], null)).slice(0, 4).map((s) => ({ type: "School", label: s.name, sub: s.grp || "", tone: C.muted, go: () => setView("schools-list") })),
   ] : [];
   const pickResult = (r) => { r.go(); setGq(""); };
 
@@ -304,7 +305,7 @@ export default function Page() {
       <div className="x-main">
         <header className="x-top">
           <div className="x-searchbox">
-            <div className="x-searchwrap"><Search size={16} color={C.muted} /><input className="x-search" placeholder="Search candidates, schools, vacancies, LSAs…" value={gq} onChange={(e) => setGq(e.target.value)} />{gq && <button className="x-searchclear" onClick={() => setGq("")}><X size={14} /></button>}</div>
+            <div className="x-searchwrap"><Search size={16} color={C.muted} /><input className="x-search" placeholder="Search by name, phone, email, ref, school…" value={gq} onChange={(e) => setGq(e.target.value)} />{gq && <button className="x-searchclear" onClick={() => setGq("")}><X size={14} /></button>}</div>
             {gq && (
               <>
                 <div className="x-scrim" style={{ background: "transparent" }} onClick={() => setGq("")} />
@@ -583,7 +584,7 @@ function TeacherDB({ teachers, onSelect, onAdd, onDel }) {
   const [fCurr, setFCurr] = useState("All");
   const [fQual, setFQual] = useState("All");
   const list = teachers.filter((t) => {
-    if (!((t.name || "") + (t.ref || "") + (t.spec || "") + (t.status || "")).toLowerCase().includes(q.toLowerCase())) return false;
+    if (!searchHit(q.trim().toLowerCase(), digits(q), [t.name, t.ref, t.spec, t.status, t.email, t.phone, t.location, t.curriculum, t.qual], t.phone)) return false;
     if (fStatus !== "All" && (t.status || "") !== fStatus) return false;
     if (fCurr !== "All" && !(t.curriculum || "").toLowerCase().includes(fCurr.toLowerCase())) return false;
     if (fQual === "QTS" && !(t.qual || "").toLowerCase().includes("qts")) return false;
@@ -597,7 +598,7 @@ function TeacherDB({ teachers, onSelect, onAdd, onDel }) {
         <div style={{ display: "flex", gap: 8 }}><button className="x-ghost" onClick={() => downloadCsv("teachers.csv", TEACHER_CSV, teachers)}><Download size={14} /> Download Excel</button><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New candidate</button></div>
       </div>
       <div className="x-filterbar">
-        <div className="x-searchwrap" style={{ maxWidth: 300 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Search this database…" value={q} onChange={(e) => setQ(e.target.value)} />{q && <button className="x-searchclear" onClick={() => setQ("")}><X size={13} /></button>}</div>
+        <div className="x-searchwrap" style={{ maxWidth: 300 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Name, phone, email, ref…" value={q} onChange={(e) => setQ(e.target.value)} />{q && <button className="x-searchclear" onClick={() => setQ("")}><X size={13} /></button>}</div>
         <select className="x-input x-filtersel" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>{["All", "New", "Needs review", "Approved", "In Review", "Placed", "Not Suitable"].map((o) => <option key={o}>{o}</option>)}</select>
         <select className="x-input x-filtersel" value={fCurr} onChange={(e) => setFCurr(e.target.value)}>{["All", "British", "IB", "American", "Indian", "MOE"].map((o) => <option key={o}>{o}</option>)}</select>
         <select className="x-input x-filtersel" value={fQual} onChange={(e) => setFQual(e.target.value)}>{["All", "QTS", "PGCE"].map((o) => <option key={o}>{o}</option>)}</select>
@@ -739,7 +740,7 @@ function LsaDirectory({ lsas, onSelect, onAdd, onDel }) {
   const [fStatus, setFStatus] = useState("All");
   const [fCert, setFCert] = useState("All");
   const list = lsas.filter((l) => {
-    if (!((l.name || "") + (l.cert || "") + (l.langs || "") + (l.location || "")).toLowerCase().includes(q.toLowerCase())) return false;
+    if (!searchHit(q.trim().toLowerCase(), digits(q), [l.name, l.cert, l.langs, l.location, l.email, l.phone, l.background], l.phone)) return false;
     if (fStatus !== "All" && (l.status || "") !== fStatus) return false;
     if (fCert !== "All" && !(l.cert || "").toLowerCase().includes(fCert.toLowerCase())) return false;
     return true;
@@ -751,7 +752,7 @@ function LsaDirectory({ lsas, onSelect, onAdd, onDel }) {
         <div style={{ display: "flex", gap: 8 }}><button className="x-ghost" onClick={() => downloadCsv("lsas.csv", LSA_CSV, lsas)}><Download size={14} /> Download Excel</button><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New LSA</button></div>
       </div>
       <div className="x-filterbar">
-        <div className="x-searchwrap" style={{ maxWidth: 300 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Search LSAs…" value={q} onChange={(e) => setQ(e.target.value)} />{q && <button className="x-searchclear" onClick={() => setQ("")}><X size={13} /></button>}</div>
+        <div className="x-searchwrap" style={{ maxWidth: 300 }}><Search size={15} color={C.muted} /><input className="x-search" placeholder="Name, phone, email, cert…" value={q} onChange={(e) => setQ(e.target.value)} />{q && <button className="x-searchclear" onClick={() => setQ("")}><X size={13} /></button>}</div>
         <select className="x-input x-filtersel" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>{["All", "Available", "Matching", "Placed", "Needs review"].map((o) => <option key={o}>{o}</option>)}</select>
         <select className="x-input x-filtersel" value={fCert} onChange={(e) => setFCert(e.target.value)}>{["All", "ABAT", "SEN diploma", "Level 3"].map((o) => <option key={o}>{o}</option>)}</select>
         <span className="x-filtercount">{list.length} shown</span>
@@ -1374,6 +1375,15 @@ async function extractFileText(file) {
 }
 const digits = (s) => String(s || "").replace(/\D/g, "");
 const waNumber = (phone) => { let n = digits(phone); if (!n) return ""; if (n.startsWith("00")) n = n.slice(2); else if (n.startsWith("0")) n = "971" + n.slice(1); return n; };
+function searchHit(ql, qd, fields, phone) {
+  if (fields.filter(Boolean).join(" \u0001 ").toLowerCase().includes(ql)) return true;
+  if (qd && qd.length >= 3 && phone) {
+    const strip = (d) => d.replace(/^00/, "").replace(/^971/, "").replace(/^0/, "");
+    const np = strip(digits(phone)); const nq = strip(qd);
+    if (nq.length >= 3 && np.includes(nq)) return true;
+  }
+  return false;
+}
 function AttachFiles({ candidates, people, onDone }) {
   const [pending, setPending] = useState([]);
   const [done, setDone] = useState([]);

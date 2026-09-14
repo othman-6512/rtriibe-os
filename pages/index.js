@@ -115,7 +115,7 @@ const NAV = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, kind: "leaf" },
   { id: "extract", label: "Bulk Extract", icon: UploadCloud, kind: "leaf", badge: "CV" },
   { id: "finance", label: "Finance", icon: Receipt, kind: "leaf" },
-  { id: "g-teachers", label: "Teachers", icon: GraduationCap, kind: "group", items: [{ id: "t-database", label: "Database" }, { id: "t-attach", label: "Attach CVs" }, { id: "t-vacancies", label: "Vacancies" }, { id: "t-pipeline", label: "Pipeline" }, { id: "t-covers", label: "Covers" }] },
+  { id: "g-teachers", label: "Teachers", icon: GraduationCap, kind: "group", items: [{ id: "t-database", label: "Database" }, { id: "t-attach", label: "Attach CVs" }, { id: "t-match", label: "Match" }, { id: "t-vacancies", label: "Vacancies" }, { id: "t-pipeline", label: "Pipeline" }, { id: "t-covers", label: "Covers" }] },
   { id: "g-lsas", label: "LSAs", icon: Heart, kind: "group", items: [{ id: "lsa-dashboard", label: "LSA Dashboard" }, { id: "lsa-directory", label: "Directory" }, { id: "lsa-bookings", label: "Bookings" }, { id: "lsa-attendance", label: "Attendance" }, { id: "lsa-add", label: "Add LSAs" }] },
   { id: "g-tasks", label: "Tasks", icon: ListChecks, kind: "group", items: [{ id: "tasks-todo", label: "To-do" }, { id: "tasks-log", label: "Daily log" }] },
   { id: "g-schools", label: "Schools", icon: Building2, kind: "group", items: [{ id: "schools-list", label: "School list" }] },
@@ -271,7 +271,7 @@ export default function Page() {
   const ql = gq.trim().toLowerCase();
   const qd = digits(gq);
   const searchResults = ql ? [
-    ...teachers.filter((t) => searchHit(ql, qd, [t.name, t.ref, t.spec, t.email, t.phone, t.location, t.curriculum, t.qual], t.phone)).slice(0, 8).map((t) => ({ type: "Candidate", label: t.name, sub: [t.ref, t.spec, t.phone, t.email].filter(Boolean).join(" · "), tone: C.blue, go: () => { setSelL(null); setSelT(t.id); setView("t-database"); } })),
+    ...teachers.filter((t) => searchHit(ql, qd, [t.name, t.ref, t.spec, t.email, t.phone, t.location, t.curriculum, t.qual, t.verbatim_qualifications, t.verbatim_experience, t.notes], t.phone)).slice(0, 8).map((t) => ({ type: "Candidate", label: t.name, sub: [t.ref, t.spec, t.phone, t.email].filter(Boolean).join(" · "), tone: C.blue, go: () => { setSelL(null); setSelT(t.id); setView("t-database"); } })),
     ...lsas.filter((l) => searchHit(ql, qd, [l.name, l.cert, l.langs, l.email, l.phone, l.location], l.phone)).slice(0, 8).map((l) => ({ type: "LSA", label: l.name, sub: [l.cert, l.phone, l.email].filter(Boolean).join(" · "), tone: C.green, go: () => { setSelT(null); setSelL(l.id); setView("lsa-directory"); } })),
     ...vacancies.filter((v) => searchHit(ql, qd, [v.role, v.school, v.contact], null)).slice(0, 6).map((v) => ({ type: "Vacancy", label: v.role, sub: v.school || "", tone: C.red, go: () => setView("t-vacancies") })),
     ...pipeline.filter((p) => searchHit(ql, qd, [p.candidate_name, p.school, p.role], null)).slice(0, 6).map((p) => ({ type: "Pipeline", label: p.candidate_name, sub: (p.school || "") + " · " + (p.stage || ""), tone: C.amber, go: () => setView("t-pipeline") })),
@@ -355,6 +355,7 @@ export default function Page() {
           {view === "t-vacancies" && selV && <VacancyDetail vacancy={vacancies.find((v) => v.id === selV)} candidates={teachers} subs={submissions.filter((s) => s.vacancy_id === selV)} onBack={() => setSelV(null)} onAddSub={addSubmission} onUpdateSub={updateSubmission} onDelSub={delSubmission} />}
           {view === "t-covers" && <Covers rows={covers} people={teacherPeople} onAdd={(r) => insertRow("covers", r)} onUpdate={(id, p) => updateRow("covers", id, p)} onDel={(id) => deleteRow("covers", id)} />}
           {view === "t-attach" && <AttachFiles candidates={teachers} people={teacherPeople} onDone={() => reloadTable("candidates")} />}
+          {view === "t-match" && <Matcher candidates={teachers} onOpen={(id) => { setSelL(null); setSelT(id); setView("t-database"); }} />}
           {view === "t-pipeline" && <PipelineView rows={pipeline} vacancies={vacancies} people={allPeople} onAdd={(r) => insertRow("pipeline", r)} onUpdate={updatePipelineRow} onDel={(id) => deleteRow("pipeline", id)} onImport={(rows) => importRows("pipeline", rows)} />}
 
           {view === "lsa-dashboard" && <LsaDashboard lsas={lsas} go={openLeaf} />}
@@ -584,7 +585,7 @@ function TeacherDB({ teachers, onSelect, onAdd, onDel }) {
   const [fCurr, setFCurr] = useState("All");
   const [fQual, setFQual] = useState("All");
   const list = teachers.filter((t) => {
-    if (!searchHit(q.trim().toLowerCase(), digits(q), [t.name, t.ref, t.spec, t.status, t.email, t.phone, t.location, t.curriculum, t.qual], t.phone)) return false;
+    if (!searchHit(q.trim().toLowerCase(), digits(q), [t.name, t.ref, t.spec, t.status, t.email, t.phone, t.location, t.curriculum, t.qual, t.verbatim_qualifications, t.verbatim_experience, t.notes], t.phone)) return false;
     if (fStatus !== "All" && (t.status || "") !== fStatus) return false;
     if (fCurr !== "All" && !(t.curriculum || "").toLowerCase().includes(fCurr.toLowerCase())) return false;
     if (fQual === "QTS" && !(t.qual || "").toLowerCase().includes("qts")) return false;
@@ -1040,8 +1041,9 @@ const COVER_BASE = [
   { key: "status", label: "Status", type: "select", opts: ["Active", "Ended"] },
 ];
 const dayFactor = (d) => (d.portion === "Half" ? 0.5 : 1);
-const candDayPay = (c, d) => (d.type === "Friday" ? Number(c.friday_rate || 0) : Number(c.day_rate || 0)) * dayFactor(d);
-const schoolDayCharge = (c, d) => (d.type === "Friday" ? Number(c.school_friday_rate || 0) : Number(c.school_day_rate || 0)) * dayFactor(d);
+const hasVal = (v) => v !== undefined && v !== null && v !== "";
+const candDayPay = (c, d) => hasVal(d.pay) ? Number(d.pay) : (d.type === "Friday" ? Number(c.friday_rate || 0) : Number(c.day_rate || 0)) * dayFactor(d);
+const schoolDayCharge = (c, d) => hasVal(d.charge) ? Number(d.charge) : (d.type === "Friday" ? Number(c.school_friday_rate || 0) : Number(c.school_day_rate || 0)) * dayFactor(d);
 const coverDays = (c) => (Array.isArray(c.days) ? c.days : []);
 const candPay = (c) => coverDays(c).reduce((s, d) => s + candDayPay(c, d), 0);
 const schoolCharge = (c) => coverDays(c).reduce((s, d) => s + schoolDayCharge(c, d), 0);
@@ -1093,12 +1095,12 @@ function Covers({ rows, people, onAdd, onUpdate, onDel }) {
   const [modal, setModal] = useState(false);
   const [editC, setEditC] = useState(null);
   const [openC, setOpenC] = useState(null);
-  const [day, setDay] = useState({ date: "", type: "Weekday", portion: "Full" });
+  const [day, setDay] = useState({ date: "", type: "Weekday", portion: "Full", pay: "", charge: "" });
   const [ts, setTs] = useState({ open: false, from: "", to: "", picked: {}, amounts: false });
   const fields = [{ key: "teacher_name", label: "Teacher", type: "person" }, ...COVER_BASE];
   const cover = openC ? rows.find((r) => r.id === openC.id) : null;
   const days = cover ? coverDays(cover) : [];
-  const addDay = () => { if (!cover || !day.date) return; onUpdate(cover.id, { days: [...days, { id: Date.now(), date: day.date, type: day.type, portion: day.portion }] }); setDay({ date: "", type: "Weekday", portion: "Full" }); };
+  const addDay = () => { if (!cover || !day.date) return; onUpdate(cover.id, { days: [...days, { id: Date.now(), date: day.date, type: day.type, portion: day.portion, pay: day.pay, charge: day.charge }] }); setDay({ date: "", type: "Weekday", portion: "Full", pay: "", charge: "" }); };
   const delDay = (id) => onUpdate(cover.id, { days: days.filter((d) => d.id !== id) });
   const toggle = (id) => setTs((t) => ({ ...t, picked: { ...t.picked, [id]: !t.picked[id] } }));
   const runTs = () => { const chosen = rows.filter((c) => ts.picked[c.id]); generateTimesheet(chosen.length ? chosen : rows, ts.from, ts.to, ts.amounts); };
@@ -1133,9 +1135,10 @@ function Covers({ rows, people, onAdd, onUpdate, onDel }) {
           <div className="x-stat"><span className="x-statbar" style={{ background: C.amber }} /><div className="x-statv nums">AED {fmt(candPay(cover))}</div><div className="x-statl">Candidate pay</div></div>
           <div className="x-stat"><span className="x-statbar" style={{ background: C.green }} /><div className="x-statv nums">AED {fmt(schoolCharge(cover))}</div><div className="x-statl">School charge</div></div>
         </div>
-        <div className="x-payadd"><input className="x-input" type="date" value={day.date} onChange={(e) => setDay({ ...day, date: e.target.value })} /><select className="x-input" value={day.type} onChange={(e) => setDay({ ...day, type: e.target.value })}><option>Weekday</option><option>Friday</option></select><select className="x-input" value={day.portion} onChange={(e) => setDay({ ...day, portion: e.target.value })}><option>Full</option><option>Half</option></select><button className="x-primary sm" onClick={addDay}><Plus size={14} /></button></div>
+        <div className="x-payadd"><input className="x-input" type="date" value={day.date} onChange={(e) => setDay({ ...day, date: e.target.value })} /><select className="x-input" value={day.type} onChange={(e) => setDay({ ...day, type: e.target.value })}><option>Weekday</option><option>Friday</option></select><select className="x-input" value={day.portion} onChange={(e) => setDay({ ...day, portion: e.target.value })}><option>Full</option><option>Half</option></select><input className="x-input" style={{ maxWidth: 110 }} type="number" placeholder="Pay override" value={day.pay} onChange={(e) => setDay({ ...day, pay: e.target.value })} /><input className="x-input" style={{ maxWidth: 120 }} type="number" placeholder="Charge override" value={day.charge} onChange={(e) => setDay({ ...day, charge: e.target.value })} /><button className="x-primary sm" onClick={addDay}><Plus size={14} /></button></div>
+        <div className="x-pmeta" style={{ marginBottom: 8 }}>Leave the override fields blank to use the cover's default rates. Fill them to pay a different amount for that day.</div>
         {days.length === 0 && <div className="x-empty">No days logged.</div>}
-        {days.map((d) => <div key={d.id} className="x-payrow"><div><div className="x-notet nums">{d.date}</div><div className="x-paymeta">{d.type}{d.portion === "Half" ? " · half day" : " · full day"} · pay AED {fmt(candDayPay(cover, d))} · charge AED {fmt(schoolDayCharge(cover, d))}</div></div><button className="x-ic" onClick={() => delDay(d.id)}><Trash2 size={13} /></button></div>)}
+        {days.map((d) => <div key={d.id} className="x-payrow"><div><div className="x-notet nums">{d.date}</div><div className="x-paymeta">{d.type}{d.portion === "Half" ? " · half day" : " · full day"}{(hasVal(d.pay) || hasVal(d.charge)) ? " · custom" : ""} · pay AED {fmt(candDayPay(cover, d))} · charge AED {fmt(schoolDayCharge(cover, d))}</div></div><button className="x-ic" onClick={() => delDay(d.id)}><Trash2 size={13} /></button></div>)}
       </div></>}
     </div>
   );
@@ -1496,6 +1499,54 @@ function AttachFiles({ candidates, people, onDone }) {
       {done.length > 0 && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Attached</h2><span className="x-pmeta">{done.length} done</span></div>
         <div className="x-doclist">{done.slice(0, 100).map((r, i) => <div key={i} className="x-docrow"><div className="x-docname"><CheckCircle2 size={15} color={C.green} /> {r.name}</div><span className="mut">→ {r.candidate} · {r.how}</span></div>)}{done.length > 100 && <div className="x-empty">+ {done.length - 100} more</div>}</div>
       </div>}
+    </div>
+  );
+}
+
+/* ======================= VACANCY / CANDIDATE MATCHER ======================= */
+function Matcher({ candidates, onOpen }) {
+  const [q, setQ] = useState("");
+  const [curr, setCurr] = useState("");
+  const [minYears, setMinYears] = useState("");
+  const [status, setStatus] = useState("All");
+  const terms = q.toLowerCase().split(/[\s,]+/).map((t) => t.trim()).filter((t) => t.length >= 2);
+  const hay = (c) => [c.name, c.spec, c.curriculum, c.qual, c.verbatim_qualifications, c.verbatim_experience, c.location, c.visa, c.availability, c.notes].filter(Boolean).join(" \u0001 ").toLowerCase();
+  const scored = candidates.map((c) => {
+    const h = hay(c);
+    const matched = terms.filter((t) => h.includes(t));
+    return { c, score: matched.length, matched };
+  }).filter(({ c, score }) => {
+    if (terms.length && score === 0) return false;
+    if (curr.trim() && !(c.curriculum || "").toLowerCase().includes(curr.trim().toLowerCase())) return false;
+    if (minYears && Number(c.uae_years || 0) < Number(minYears)) return false;
+    if (status !== "All" && (c.status || "") !== status) return false;
+    return true;
+  }).sort((a, b) => b.score - a.score || Number(b.c.uae_years || 0) - Number(a.c.uae_years || 0)).slice(0, 60);
+  return (
+    <div className="x-page">
+      <div className="x-headrow"><div><h1 className="x-h1">Match candidates</h1><p className="x-sub">Type what the vacancy needs — subject, curriculum, certificate, experience, location — and it ranks your candidates. Free, nothing is read by AI.</p></div></div>
+      <div className="x-panel">
+        <div className="x-formfield full"><span className="x-formlabel">What are you looking for?</span><input className="x-input" placeholder="e.g. EYFS British ABA phonics 5 years Dubai QTS" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <div className="x-tsrow" style={{ marginTop: 12 }}>
+          <label className="x-formlabel">Curriculum<input className="x-input" placeholder="any" value={curr} onChange={(e) => setCurr(e.target.value)} /></label>
+          <label className="x-formlabel">Min UAE years<input className="x-input" type="number" placeholder="any" value={minYears} onChange={(e) => setMinYears(e.target.value)} /></label>
+          <label className="x-formlabel">Status<select className="x-input" value={status} onChange={(e) => setStatus(e.target.value)}><option>All</option><option>Available</option><option>Placed</option><option>Interviewing</option></select></label>
+        </div>
+      </div>
+      <div className="x-pmeta" style={{ margin: "4px 2px 12px" }}>{scored.length} candidate{scored.length === 1 ? "" : "s"} {terms.length ? "ranked by match" : "shown"}</div>
+      <div className="x-tablewrap"><table className="x-table"><thead><tr><th>Candidate</th><th>Specialization</th><th className="r">UAE yrs</th><th>Matches</th><th>Contact</th><th></th></tr></thead>
+        <tbody>
+          {scored.length === 0 && <tr><td colSpan={6} className="x-empty">Type some criteria above to rank your candidates.</td></tr>}
+          {scored.map(({ c, score, matched }) => <tr key={c.id} className="x-clickrow" onClick={() => onOpen(c.id)}>
+            <td className="b">{c.name}<span className="x-ref" style={{ marginLeft: 6 }}>{c.ref || ""}</span></td>
+            <td className="mut">{c.spec || "—"}{c.curriculum ? " · " + c.curriculum : ""}</td>
+            <td className="r nums">{c.uae_years || 0}</td>
+            <td>{terms.length ? <span className="x-matchscore">{score}/{terms.length}</span> : "—"} {matched.slice(0, 5).map((m, i) => <span key={i} className="x-kindtag" style={{ color: C.green, background: C.green + "14" }}>{m}</span>)}</td>
+            <td className="mut">{[c.phone, c.email].filter(Boolean).join(" · ") || "—"}</td>
+            <td className="rowact"><ChevronRight size={15} color={C.faint} /></td>
+          </tr>)}
+        </tbody>
+      </table></div>
     </div>
   );
 }

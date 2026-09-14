@@ -1102,6 +1102,7 @@ function Covers({ rows, people, onAdd, onUpdate, onDel }) {
   const days = cover ? coverDays(cover) : [];
   const addDay = () => { if (!cover || !day.date) return; onUpdate(cover.id, { days: [...days, { id: Date.now(), date: day.date, type: day.type, portion: day.portion, pay: day.pay, charge: day.charge }] }); setDay({ date: "", type: "Weekday", portion: "Full", pay: "", charge: "" }); };
   const delDay = (id) => onUpdate(cover.id, { days: days.filter((d) => d.id !== id) });
+  const editDay = (id, patch) => onUpdate(cover.id, { days: days.map((d) => d.id === id ? { ...d, ...patch } : d) });
   const toggle = (id) => setTs((t) => ({ ...t, picked: { ...t.picked, [id]: !t.picked[id] } }));
   const runTs = () => { const chosen = rows.filter((c) => ts.picked[c.id]); generateTimesheet(chosen.length ? chosen : rows, ts.from, ts.to, ts.amounts); };
   return (
@@ -1138,7 +1139,11 @@ function Covers({ rows, people, onAdd, onUpdate, onDel }) {
         <div className="x-payadd"><input className="x-input" type="date" value={day.date} onChange={(e) => setDay({ ...day, date: e.target.value })} /><select className="x-input" value={day.type} onChange={(e) => setDay({ ...day, type: e.target.value })}><option>Weekday</option><option>Friday</option></select><select className="x-input" value={day.portion} onChange={(e) => setDay({ ...day, portion: e.target.value })}><option>Full</option><option>Half</option></select><input className="x-input" style={{ maxWidth: 110 }} type="number" placeholder="Pay override" value={day.pay} onChange={(e) => setDay({ ...day, pay: e.target.value })} /><input className="x-input" style={{ maxWidth: 120 }} type="number" placeholder="Charge override" value={day.charge} onChange={(e) => setDay({ ...day, charge: e.target.value })} /><button className="x-primary sm" onClick={addDay}><Plus size={14} /></button></div>
         <div className="x-pmeta" style={{ marginBottom: 8 }}>Leave the override fields blank to use the cover's default rates. Fill them to pay a different amount for that day.</div>
         {days.length === 0 && <div className="x-empty">No days logged.</div>}
-        {days.map((d) => <div key={d.id} className="x-payrow"><div><div className="x-notet nums">{d.date}</div><div className="x-paymeta">{d.type}{d.portion === "Half" ? " · half day" : " · full day"}{(hasVal(d.pay) || hasVal(d.charge)) ? " · custom" : ""} · pay AED {fmt(candDayPay(cover, d))} · charge AED {fmt(schoolDayCharge(cover, d))}</div></div><button className="x-ic" onClick={() => delDay(d.id)}><Trash2 size={13} /></button></div>)}
+        {days.map((d) => { const defPay = (d.type === "Friday" ? Number(cover.friday_rate || 0) : Number(cover.day_rate || 0)) * dayFactor(d); const defCharge = (d.type === "Friday" ? Number(cover.school_friday_rate || 0) : Number(cover.school_day_rate || 0)) * dayFactor(d); return (
+          <div key={d.id} className="x-payrow"><div style={{ flex: 1 }}><div className="x-notet nums">{d.date}</div><div className="x-paymeta">{d.type}{d.portion === "Half" ? " · half day" : " · full day"}{(hasVal(d.pay) || hasVal(d.charge)) ? " · custom" : ""}</div></div>
+            <div className="x-dayedit"><label>Pay<input className="x-input" type="number" defaultValue={hasVal(d.pay) ? d.pay : ""} placeholder={fmt(defPay)} onBlur={(e) => editDay(d.id, { pay: e.target.value })} /></label><label>Charge<input className="x-input" type="number" defaultValue={hasVal(d.charge) ? d.charge : ""} placeholder={fmt(defCharge)} onBlur={(e) => editDay(d.id, { charge: e.target.value })} /></label></div>
+            <button className="x-ic" onClick={() => delDay(d.id)}><Trash2 size={13} /></button></div>
+        ); })}
       </div></>}
     </div>
   );

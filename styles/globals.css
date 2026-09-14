@@ -336,3 +336,6 @@ textarea.x-input { resize: vertical; }
 /* clickable rows */
 .x-clickrow { cursor: pointer; }
 .x-clickrow:hover td { background: #F6F7F9; }
+
+/* matcher */
+.x-matchscore { display: inline-block; font-size: 11px; font-weight: 800; color: #DA2A34; background: #DA2A3414; border-radius: 6px; padding: 1px 7px; margin-right: 4px; }

@@ -1064,9 +1064,10 @@ function generateAttendanceSheet(covers, fromD, toD) {
       const wd = new Date(dt + "T00:00:00Z").getUTCDay();
       const weekend = wd === 6 || wd === 0;
       const lg = logged[dt];
+      const pay = lg ? candDayPay(c, lg) : 0;
       if (weekend && !lg) return "";
-      if (lg) { present++; return `<tr><td>${dt}</td><td>${dow[wd]}</td><td class="pres">Present</td><td>${lg.type}${lg.portion === "Half" ? " · half day" : " · full day"}</td></tr>`; }
-      absent++; return `<tr class="absrow"><td>${dt}</td><td>${dow[wd]}</td><td class="ab">Absent</td><td>—</td></tr>`;
+      if (lg && pay > 0) { present++; const half = lg.portion === "Half" ? " (half day)" : ""; return `<tr><td>${dt}</td><td>${dow[wd]}</td><td class="pres">Present${half}</td><td>${lg.type}</td></tr>`; }
+      absent++; return `<tr class="absrow"><td>${dt}</td><td>${dow[wd]}</td><td class="ab">Absent</td><td>${lg ? lg.type : "—"}</td></tr>`;
     }).join("");
     any = true;
     html += `<div class="cand"><div class="candh">${esc(c.teacher_name || "Candidate")} <span>${esc(c.school || "")}</span></div><table><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>Session</th></tr></thead><tbody>${lines}<tr class="sub"><td colspan="4">Present: ${present} day(s) &nbsp;·&nbsp; Absent: ${absent} day(s)</td></tr></tbody></table></div>`;

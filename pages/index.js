@@ -1053,27 +1053,23 @@ function generateAttendanceSheet(covers, fromD, toD) {
   const esc = (s) => String(s || "").replace(/</g, "");
   const dow = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   let html = ""; let any = false;
+  const inRange = (dt) => (!fromD || dt >= fromD) && (!toD || dt <= toD);
   covers.forEach((c) => {
-    const start = fromD || c.start_date; const end = toD || c.end_date;
-    if (!start || !end) return;
-    const logged = {}; coverDays(c).forEach((d) => { logged[d.date] = d; });
-    const dates = dateRange(start, end);
-    if (!dates.length) return;
+    const ds = coverDays(c).filter((d) => inRange(d.date)).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (!ds.length) return;
     let present = 0; let absent = 0;
-    const lines = dates.map((dt) => {
-      const wd = new Date(dt + "T00:00:00Z").getUTCDay();
-      const weekend = wd === 6 || wd === 0;
-      const lg = logged[dt];
-      const pay = lg ? candDayPay(c, lg) : 0;
-      if (weekend && !lg) return "";
-      if (lg && pay > 0) { present++; const half = lg.portion === "Half" ? " (half day)" : ""; return `<tr><td>${dt}</td><td>${dow[wd]}</td><td class="pres">Present${half}</td><td>${lg.type}</td></tr>`; }
-      absent++; return `<tr class="absrow"><td>${dt}</td><td>${dow[wd]}</td><td class="ab">Absent</td><td>${lg ? lg.type : "—"}</td></tr>`;
+    const lines = ds.map((d) => {
+      const wd = new Date(d.date + "T00:00:00Z").getUTCDay();
+      const dowName = isNaN(wd) ? "" : dow[wd];
+      const pay = candDayPay(c, d);
+      if (pay > 0) { present++; const half = d.portion === "Half" ? " (half day)" : ""; return `<tr><td>${d.date}</td><td>${dowName}</td><td class="pres">Present${half}</td><td>${d.type}</td></tr>`; }
+      absent++; return `<tr class="absrow"><td>${d.date}</td><td>${dowName}</td><td class="ab">Absent</td><td>${d.type}</td></tr>`;
     }).join("");
     any = true;
     html += `<div class="cand"><div class="candh">${esc(c.teacher_name || "Candidate")} <span>${esc(c.school || "")}</span></div><table><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>Session</th></tr></thead><tbody>${lines}<tr class="sub"><td colspan="4">Present: ${present} day(s) &nbsp;·&nbsp; Absent: ${absent} day(s)</td></tr></tbody></table></div>`;
   });
-  if (!any) { alert("Set a date range above (or fill the cover's start and end dates) so absences can be worked out."); return; }
-  const period = (fromD || "cover start") + "  to  " + (toD || "cover end");
+  if (!any) { alert("No logged days to show. Log the days (with pay, or 0 for absent) in the cover's Attendance first."); return; }
+  const period = (fromD || toD) ? ((fromD || "start") + "  to  " + (toD || "today")) : "all logged days";
   const w = window.open("", "_blank");
   if (!w) { alert("Please allow pop-ups so the sheet can open."); return; }
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Attendance</title><style>
@@ -1161,7 +1157,7 @@ function Covers({ rows, people, onAdd, onUpdate, onDel }) {
       {ts.open && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Download timesheet PDF</h2></div>
         <div className="x-tsrow"><label className="x-formlabel">Sheet type<select className="x-input" value={ts.mode} onChange={(e) => setTs({ ...ts, mode: e.target.value })}><option value="worked">Days worked</option><option value="attendance">Attendance (present & absent)</option></select></label><label className="x-formlabel">From<input className="x-input" type="date" value={ts.from} onChange={(e) => setTs({ ...ts, from: e.target.value })} /></label><label className="x-formlabel">To<input className="x-input" type="date" value={ts.to} onChange={(e) => setTs({ ...ts, to: e.target.value })} /></label><button className="x-primary" onClick={runTs}><Download size={14} /> Generate</button></div>
         {ts.mode === "worked" && <label className="x-cbrow"><input type="checkbox" checked={ts.amounts} onChange={(e) => setTs({ ...ts, amounts: e.target.checked })} /> Include pay / charge amounts (off = days only)</label>}
-        {ts.mode === "attendance" && <div className="x-pmeta">Attendance uses the date range (or each cover's start/end dates) to mark every working day present or absent.</div>}
+        {ts.mode === "attendance" && <div className="x-pmeta">Attendance shows only the days you logged, in date order. A day with pay above 0 is Present; a day logged as 0 is Absent.</div>}
         <div className="x-tspick"><div className="x-pmeta" style={{ marginBottom: 6 }}>Pick candidates (none selected = all):</div>{rows.map((c) => <label key={c.id} className="x-cbrow"><input type="checkbox" checked={!!ts.picked[c.id]} onChange={() => toggle(c.id)} /> {c.teacher_name} · {c.school || "—"}</label>)}</div>
       </div>}
       {rows.length === 0 ? <div className="x-panel"><div className="x-empty">No covers yet. Press New cover.</div></div> : (
@@ -1190,7 +1186,7 @@ function Covers({ rows, people, onAdd, onUpdate, onDel }) {
         <div className="x-payadd"><input className="x-input" type="date" value={day.date} onChange={(e) => setDay({ ...day, date: e.target.value })} /><select className="x-input" value={day.type} onChange={(e) => setDay({ ...day, type: e.target.value })}><option>Weekday</option><option>Friday</option></select><select className="x-input" value={day.portion} onChange={(e) => setDay({ ...day, portion: e.target.value })}><option>Full</option><option>Half</option></select><input className="x-input" style={{ maxWidth: 110 }} type="number" placeholder="Pay override" value={day.pay} onChange={(e) => setDay({ ...day, pay: e.target.value })} /><input className="x-input" style={{ maxWidth: 120 }} type="number" placeholder="Charge override" value={day.charge} onChange={(e) => setDay({ ...day, charge: e.target.value })} /><button className="x-primary sm" onClick={addDay}><Plus size={14} /></button></div>
         <div className="x-pmeta" style={{ marginBottom: 8 }}>Leave the override fields blank to use the cover's default rates. Fill them to pay a different amount for that day.</div>
         {days.length === 0 && <div className="x-empty">No days logged.</div>}
-        {days.map((d) => { const defPay = (d.type === "Friday" ? Number(cover.friday_rate || 0) : Number(cover.day_rate || 0)) * dayFactor(d); const defCharge = (d.type === "Friday" ? Number(cover.school_friday_rate || 0) : Number(cover.school_day_rate || 0)) * dayFactor(d); return (
+        {[...days].sort((a, b) => (a.date < b.date ? -1 : 1)).map((d) => { const defPay = (d.type === "Friday" ? Number(cover.friday_rate || 0) : Number(cover.day_rate || 0)) * dayFactor(d); const defCharge = (d.type === "Friday" ? Number(cover.school_friday_rate || 0) : Number(cover.school_day_rate || 0)) * dayFactor(d); return (
           <div key={d.id} className="x-payrow"><div style={{ flex: 1 }}><div className="x-notet nums">{d.date}</div><div className="x-paymeta">{d.type}{d.portion === "Half" ? " · half day" : " · full day"}{(hasVal(d.pay) || hasVal(d.charge)) ? " · custom" : ""}</div></div>
             <div className="x-dayedit"><label>Pay<input className="x-input" type="number" defaultValue={hasVal(d.pay) ? d.pay : ""} placeholder={fmt(defPay)} onBlur={(e) => editDay(d.id, { pay: e.target.value })} /></label><label>Charge<input className="x-input" type="number" defaultValue={hasVal(d.charge) ? d.charge : ""} placeholder={fmt(defCharge)} onBlur={(e) => editDay(d.id, { charge: e.target.value })} /></label></div>
             <button className="x-ic" onClick={() => delDay(d.id)}><Trash2 size={13} /></button></div>

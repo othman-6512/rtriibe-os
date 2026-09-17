@@ -1048,6 +1048,55 @@ const coverDays = (c) => (Array.isArray(c.days) ? c.days : []);
 const candPay = (c) => coverDays(c).reduce((s, d) => s + candDayPay(c, d), 0);
 const schoolCharge = (c) => coverDays(c).reduce((s, d) => s + schoolDayCharge(c, d), 0);
 
+function dateRange(a, b) { const out = []; let d = new Date(a + "T00:00:00Z"); const e = new Date(b + "T00:00:00Z"); if (isNaN(d) || isNaN(e)) return out; let guard = 0; while (d <= e && guard < 400) { out.push(d.toISOString().slice(0, 10)); d = new Date(d.getTime() + 864e5); guard++; } return out; }
+function generateAttendanceSheet(covers, fromD, toD) {
+  const esc = (s) => String(s || "").replace(/</g, "");
+  const dow = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  let html = ""; let any = false;
+  covers.forEach((c) => {
+    const start = fromD || c.start_date; const end = toD || c.end_date;
+    if (!start || !end) return;
+    const logged = {}; coverDays(c).forEach((d) => { logged[d.date] = d; });
+    const dates = dateRange(start, end);
+    if (!dates.length) return;
+    let present = 0; let absent = 0;
+    const lines = dates.map((dt) => {
+      const wd = new Date(dt + "T00:00:00Z").getUTCDay();
+      const weekend = wd === 6 || wd === 0;
+      const lg = logged[dt];
+      if (weekend && !lg) return "";
+      if (lg) { present++; return `<tr><td>${dt}</td><td>${dow[wd]}</td><td class="pres">Present</td><td>${lg.type}${lg.portion === "Half" ? " · half day" : " · full day"}</td></tr>`; }
+      absent++; return `<tr class="absrow"><td>${dt}</td><td>${dow[wd]}</td><td class="ab">Absent</td><td>—</td></tr>`;
+    }).join("");
+    any = true;
+    html += `<div class="cand"><div class="candh">${esc(c.teacher_name || "Candidate")} <span>${esc(c.school || "")}</span></div><table><thead><tr><th>Date</th><th>Day</th><th>Status</th><th>Session</th></tr></thead><tbody>${lines}<tr class="sub"><td colspan="4">Present: ${present} day(s) &nbsp;·&nbsp; Absent: ${absent} day(s)</td></tr></tbody></table></div>`;
+  });
+  if (!any) { alert("Set a date range above (or fill the cover's start and end dates) so absences can be worked out."); return; }
+  const period = (fromD || "cover start") + "  to  " + (toD || "cover end");
+  const w = window.open("", "_blank");
+  if (!w) { alert("Please allow pop-ups so the sheet can open."); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Attendance</title><style>
+    *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}body{margin:0;padding:40px;color:#1C2230}
+    .bar{display:flex;gap:10px;margin-bottom:20px}.btn{padding:11px 20px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer}.btn.red{background:#DA2A34;color:#fff}.btn.grey{background:#EEF0F4;color:#1C2230}
+    .top{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #DA2A34;padding-bottom:16px}
+    .brand{font-size:26px;font-weight:800}.brand span{color:#DA2A34}.brand small{display:block;font-size:10px;font-weight:600;color:#7A8494;letter-spacing:2px;margin-top:2px}
+    h1{font-size:20px;margin:0}.per{font-size:12px;color:#666;text-align:right}
+    .cand{margin-top:24px;page-break-inside:avoid}.candh{font-size:14px;font-weight:700;margin-bottom:6px}.candh span{font-weight:400;color:#777;font-size:12px}
+    table{width:100%;border-collapse:collapse}th{background:#1C2230;color:#fff;text-align:left;padding:9px 11px;font-size:11px}
+    td{padding:8px 11px;border-bottom:1px solid #eee;font-size:12px}.sub td{font-weight:700;background:#F6F7F9;border-bottom:none}
+    .pres{color:#17915B;font-weight:700}.ab{color:#DA2A34;font-weight:700}.absrow td{background:#FDF3F3}
+    .sign{margin-top:40px;display:flex;gap:60px;font-size:12px;color:#555}.sign div{flex:1;border-top:1px solid #999;padding-top:6px}
+    .foot{margin-top:26px;border-top:1px solid #eee;padding-top:12px;font-size:10px;color:#888}
+    @media print{.bar{display:none}}
+  </style></head><body>
+    <div class="bar"><button class="btn red" onclick="window.print()">Download / Print PDF</button><button class="btn grey" onclick="window.close()">&larr; Close</button></div>
+    <div class="top"><div class="brand"><span>r</span>Triibe<small>FZCO &middot; ATTENDANCE RECORD</small></div><div><h1>Attendance record</h1><div class="per">Period: ${esc(period)}</div></div></div>
+    ${html}
+    <div class="sign"><div>Candidate signature</div><div>School authorised signature</div></div>
+    <div class="foot">rTriibe FZCO &middot; TRN 100452871500003 &middot; Weekends shown only where a day was worked.</div>
+  </body></html>`);
+  w.document.close();
+}
 function generateTimesheet(covers, fromD, toD, showAmounts) {
   const esc = (s) => String(s || "").replace(/</g, "");
   const money = (n) => new Intl.NumberFormat("en-AE", { minimumFractionDigits: 2 }).format(n);
@@ -1096,7 +1145,7 @@ function Covers({ rows, people, onAdd, onUpdate, onDel }) {
   const [editC, setEditC] = useState(null);
   const [openC, setOpenC] = useState(null);
   const [day, setDay] = useState({ date: "", type: "Weekday", portion: "Full", pay: "", charge: "" });
-  const [ts, setTs] = useState({ open: false, from: "", to: "", picked: {}, amounts: false });
+  const [ts, setTs] = useState({ open: false, from: "", to: "", picked: {}, amounts: false, mode: "worked" });
   const fields = [{ key: "teacher_name", label: "Teacher", type: "person" }, ...COVER_BASE];
   const cover = openC ? rows.find((r) => r.id === openC.id) : null;
   const days = cover ? coverDays(cover) : [];
@@ -1104,13 +1153,14 @@ function Covers({ rows, people, onAdd, onUpdate, onDel }) {
   const delDay = (id) => onUpdate(cover.id, { days: days.filter((d) => d.id !== id) });
   const editDay = (id, patch) => onUpdate(cover.id, { days: days.map((d) => d.id === id ? { ...d, ...patch } : d) });
   const toggle = (id) => setTs((t) => ({ ...t, picked: { ...t.picked, [id]: !t.picked[id] } }));
-  const runTs = () => { const chosen = rows.filter((c) => ts.picked[c.id]); generateTimesheet(chosen.length ? chosen : rows, ts.from, ts.to, ts.amounts); };
+  const runTs = () => { const chosen = rows.filter((c) => ts.picked[c.id]); const sel = chosen.length ? chosen : rows; if (ts.mode === "attendance") generateAttendanceSheet(sel, ts.from, ts.to); else generateTimesheet(sel, ts.from, ts.to, ts.amounts); };
   return (
     <div className="x-page">
       <div className="x-headrow"><div><h1 className="x-h1">Covers</h1><p className="x-sub">Supply bookings with candidate pay, school charge and attendance. Click a cover to edit it.</p></div><div style={{ display: "flex", gap: 8 }}><button className="x-ghost" onClick={() => setTs((t) => ({ ...t, open: !t.open }))}><Download size={14} /> Timesheet</button><button className="x-primary" onClick={() => setModal(true)}><Plus size={15} /> New cover</button></div></div>
       {ts.open && <div className="x-panel"><div className="x-panelhead"><h2 className="x-h2">Download timesheet PDF</h2></div>
-        <div className="x-tsrow"><label className="x-formlabel">From<input className="x-input" type="date" value={ts.from} onChange={(e) => setTs({ ...ts, from: e.target.value })} /></label><label className="x-formlabel">To<input className="x-input" type="date" value={ts.to} onChange={(e) => setTs({ ...ts, to: e.target.value })} /></label><button className="x-primary" onClick={runTs}><Download size={14} /> Generate</button></div>
-        <label className="x-cbrow"><input type="checkbox" checked={ts.amounts} onChange={(e) => setTs({ ...ts, amounts: e.target.checked })} /> Include pay / charge amounts (off = days only)</label>
+        <div className="x-tsrow"><label className="x-formlabel">Sheet type<select className="x-input" value={ts.mode} onChange={(e) => setTs({ ...ts, mode: e.target.value })}><option value="worked">Days worked</option><option value="attendance">Attendance (present & absent)</option></select></label><label className="x-formlabel">From<input className="x-input" type="date" value={ts.from} onChange={(e) => setTs({ ...ts, from: e.target.value })} /></label><label className="x-formlabel">To<input className="x-input" type="date" value={ts.to} onChange={(e) => setTs({ ...ts, to: e.target.value })} /></label><button className="x-primary" onClick={runTs}><Download size={14} /> Generate</button></div>
+        {ts.mode === "worked" && <label className="x-cbrow"><input type="checkbox" checked={ts.amounts} onChange={(e) => setTs({ ...ts, amounts: e.target.checked })} /> Include pay / charge amounts (off = days only)</label>}
+        {ts.mode === "attendance" && <div className="x-pmeta">Attendance uses the date range (or each cover's start/end dates) to mark every working day present or absent.</div>}
         <div className="x-tspick"><div className="x-pmeta" style={{ marginBottom: 6 }}>Pick candidates (none selected = all):</div>{rows.map((c) => <label key={c.id} className="x-cbrow"><input type="checkbox" checked={!!ts.picked[c.id]} onChange={() => toggle(c.id)} /> {c.teacher_name} · {c.school || "—"}</label>)}</div>
       </div>}
       {rows.length === 0 ? <div className="x-panel"><div className="x-empty">No covers yet. Press New cover.</div></div> : (
